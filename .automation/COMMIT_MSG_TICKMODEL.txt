@@ -1,0 +1,9 @@
+feat(model): add TickSnapshot model + unit tests
+
+- TickSnapshot.java (immutable model)
+- TickSnapshotTest.java (unit test)
+- Added modular Redis setup with Testcontainers for integration test
+  - Redis integration tests
+  - Infrastructure tests
+  
+Tests: mvn test passing

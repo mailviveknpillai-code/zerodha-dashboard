@@ -1,0 +1,8 @@
+# After reviewing and accepting the automated fixes, commit with:
+git add backend/dashboard/src/main/java/com/zerodha/dashboard/model/TickSnapshot.java
+git add backend/dashboard/src/main/java/com/zerodha/dashboard/service/RedisSnapshotKey.java
+git add backend/dashboard/src/main/java/com/zerodha/dashboard/service/RedisServiceImpl.java
+# Add any other patched files as needed
+
+git commit -m "fix: apply Copilot auto-patches for Redis and TickSnapshot compatibility"
+git push

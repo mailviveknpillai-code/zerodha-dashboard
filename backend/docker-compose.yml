@@ -1,19 +1,23 @@
-version: "3.8"
 services:
+  # 1. Redis Service (Database for both application and tests)
   redis:
-    image: redis:7-alpine
+    image: redis:7.2.5-alpine
+    container_name: zerodha-redis
+    hostname: redis
     ports:
       - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
 
+  # 2. Backend Application Service (The actual runnable app)
   backend:
     build:
-      context: ./backend
+      context: ./backend/dashboard
       dockerfile: Dockerfile
+    container_name: zerodha-backend
     ports:
       - "8080:8080"
     environment:
@@ -22,3 +26,23 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+
+  # 3. Test Runner Service (Where Testcontainers runs)
+  backend-test:
+    image: maven:3.9.6-eclipse-temurin-21
+    container_name: zerodha-backend-test
+    # Run tests from the module directory inside the container
+    working_dir: /app
+    command: mvn -B -DskipTests=false test
+    volumes:
+      # mount the dashboard module directly so /app/pom.xml exists
+      - ./dashboard:/app:cached
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      TESTCONTAINERS_DISABLED: "true"
+      SPRING_TESTCONTAINERS_ENABLED: "false"
+    depends_on:
+      redis:
+        condition: service_healthy
+    tty: true
