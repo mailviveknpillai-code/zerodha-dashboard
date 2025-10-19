@@ -64,3 +64,10 @@ jobs:
             mvn -B clean test
           fi
 
+      - name: Upload surefire reports (if any)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: backend/target/surefire-reports
+
