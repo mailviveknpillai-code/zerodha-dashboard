@@ -1,0 +1,6 @@
+To run the Copilot automation and auto-fix script:
+
+chmod +x .automation/copilot-run-and-fix.sh
+./.automation/copilot-run-and-fix.sh
+
+Review any .bak backup files created in the source directories before committing. If the fixes are correct, commit the changes.

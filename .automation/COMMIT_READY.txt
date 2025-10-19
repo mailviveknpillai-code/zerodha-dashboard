@@ -1,0 +1,15 @@
+# Run these commands to commit your changes:
+
+git checkout -b feature/phase2-tickmodel
+
+git add backend/dashboard/src/main/java/com/zerodha/dashboard/model/TickSnapshot.java
+git add backend/dashboard/src/test/java/com/zerodha/dashboard/model/TickSnapshotTest.java
+git add backend/dashboard/src/test/resources/application.properties
+
+# Use the prepared commit message:
+git commit -F .automation/COMMIT_MSG_TICKMODEL.txt
+
+# Push to remote:
+git push -u origin feature/phase2-tickmodel
+
+# Open PR and add details about implementation & testing
