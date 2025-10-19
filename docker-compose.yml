@@ -15,7 +15,7 @@ services:
   # 2. Backend Application Service (The actual runnable app)
   backend:
     build:
-      context: ./backend/dashboard
+      context: ./backend
       dockerfile: Dockerfile
     container_name: zerodha-backend
     ports:
@@ -32,7 +32,7 @@ services:
     image: maven:3.9.6-eclipse-temurin-21
     container_name: zerodha-backend-test
     # Run tests from the module directory inside the container
-    working_dir: /app/dashboard
+    working_dir: /app
     command: mvn -B -DskipTests=false test
     volumes:
       - ./backend:/app:cached
@@ -48,3 +48,4 @@ services:
       redis:
         condition: service_healthy
     tty: true
+

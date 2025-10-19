@@ -15,7 +15,7 @@ services:
   # 2. Backend Application Service (The actual runnable app)
   backend:
     build:
-      context: ./backend/dashboard
+      context: ./backend
       dockerfile: Dockerfile
     container_name: zerodha-backend
     ports:
@@ -36,7 +36,7 @@ services:
     command: mvn -B -DskipTests=false test
     volumes:
       # mount the dashboard module directly so /app/pom.xml exists
-      - ./dashboard:/app:cached
+      - ./backend:/app:cached
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -46,3 +46,4 @@ services:
       redis:
         condition: service_healthy
     tty: true
+
