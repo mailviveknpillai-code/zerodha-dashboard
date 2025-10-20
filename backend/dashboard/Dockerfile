@@ -3,7 +3,7 @@ FROM maven:3.9.6-eclipse-temurin-21 AS build
 WORKDIR /app
 
 # cache dependencies
-COPY ../../pom.xml ./parent-pom.xml
+COPY ../../pom.xml /pom.xml
 COPY pom.xml .
 RUN mvn -B dependency:go-offline -DskipTests -f pom.xml
 
