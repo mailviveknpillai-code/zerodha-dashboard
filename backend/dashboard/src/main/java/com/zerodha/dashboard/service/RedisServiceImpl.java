@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zerodha.dashboard.model.TickSnapshot;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -21,7 +22,11 @@ public class RedisServiceImpl implements RedisService {
     private final Duration expiryDuration;
     private final String redisNamespace;
 
-    public RedisServiceImpl(StringRedisTemplate redisTemplate, ObjectMapper objectMapper, Duration expiryDuration, String redisNamespace) {
+    public RedisServiceImpl(
+            StringRedisTemplate redisTemplate,
+            ObjectMapper objectMapper,
+            @Value("${redis.snapshot.ttl:PT5M}") Duration expiryDuration,
+            @Value("${redis.namespace:zerodha:snapshot:}") String redisNamespace) {
         this.redisTemplate = redisTemplate;
         this.objectMapper = objectMapper;
         this.expiryDuration = expiryDuration;
