@@ -15,8 +15,8 @@ services:
   # 2. Backend Application Service (The actual runnable app)
   backend:
     build:
-      context: ./backend/dashboard
-      dockerfile: Dockerfile
+      context: ./backend
+      dockerfile: dashboard/Dockerfile
     container_name: zerodha-backend
     ports:
       - "8080:8080"
