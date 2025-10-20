@@ -1,4 +1,16 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-body { @apply bg-slate-50 text-slate-800; }
+@import "tailwindcss";
+
+body {
+  background-color: #f8fafc;
+  color: #1e293b;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th, td {
+  text-align: center;
+  padding: 0.25rem 0.5rem;
+}

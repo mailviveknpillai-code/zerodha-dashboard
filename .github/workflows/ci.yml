@@ -31,38 +31,20 @@ jobs:
           java-version: '21'
           cache: 'maven'
 
-      - name: Verify mvn wrapper or system mvn
-        run: |
-          if [ -f "./backend/mvnw" ]; then
-            chmod +x ./backend/mvnw || true
-            echo "Using project mvnw wrapper"
-            ./backend/mvnw -v
-          elif [ -f "./mvnw" ]; then
-            chmod +x ./mvnw || true
-            echo "Using top-level mvnw wrapper"
-            ./mvnw -v
-          else
-            echo "No mvnw wrapper found — will use system 'mvn'"
-            mvn -v
-          fi
+      - name: Make mvnw executable
+        run: chmod +x ./mvnw
 
-      - name: Build and Test Backend (flattened structure)
-        working-directory: backend
+      - name: Build and Test Backend
+        working-directory: backend/dashboard
         env:
+          ALPHA_VANTAGE_ENABLED: "true"
+          ALPHA_VANTAGE_API_KEY: "RUD59ZNA5UWUZH3M"
+          ZERODHA_ENABLED: "false"
           TESTCONTAINERS_DISABLED: "true"
           SPRING_TESTCONTAINERS_ENABLED: "false"
           REDIS_HOST: "redis"
           REDIS_PORT: "6379"
-        run: |
-          if [ -f "./mvnw" ]; then
-            chmod +x ./mvnw || true
-            ./mvnw -B clean test
-          elif [ -f "../mvnw" ]; then
-            chmod +x ../mvnw || true
-            ../mvnw -B clean test
-          else
-            mvn -B clean test
-          fi
+        run: ./mvnw -B clean test
 
       - name: Upload surefire reports (if any)
         if: failure()
