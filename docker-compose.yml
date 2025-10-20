@@ -15,7 +15,7 @@ services:
   # 2. Backend Application Service (The actual runnable app)
   backend:
     build:
-      context: ./backend
+      context: ./backend/dashboard
       dockerfile: Dockerfile
     container_name: zerodha-backend
     ports:
@@ -23,11 +23,57 @@ services:
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      ALPHA_VANTAGE_ENABLED: "${ALPHA_VANTAGE_ENABLED}"
+      ALPHA_VANTAGE_API_KEY: "${ALPHA_VANTAGE_API_KEY}"
+      ZERODHA_ENABLED: "${ZERODHA_ENABLED}"
+      ZERODHA_API_KEY: "${ZERODHA_API_KEY}"
     depends_on:
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # 3. Test Runner Service (Where Testcontainers runs)
+  # 3. Frontend Service (React + Vite + Nginx)
+  frontend:
+    build:
+      context: ./frontend/dashboard-ui
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_BASE_URL=http://backend:8080
+    image: zerodha-dashboard-frontend:latest
+    container_name: zerodha-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    environment:
+      - VITE_API_BASE_URL=http://backend:8080
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost/ || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # 4. Frontend Development Service (Hot Reload)
+  frontend-dev:
+    image: node:20-alpine
+    container_name: zerodha-frontend-dev
+    working_dir: /app
+    volumes:
+      - ./frontend/dashboard-ui:/app:cached
+      - /app/node_modules
+    ports:
+      - "5174:5173"
+    command: sh -c "npm ci --legacy-peer-deps && npm run dev -- --host 0.0.0.0"
+    environment:
+      - VITE_API_BASE_URL=http://backend:8080
+    depends_on:
+      - backend
+
+  # 5. Test Runner Service (Where Testcontainers runs)
   backend-test:
     image: maven:3.9.6-eclipse-temurin-21
     container_name: zerodha-backend-test
@@ -44,6 +90,7 @@ services:
       REDIS_PORT: 6379
       TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE: "/var/run/docker.sock"
       TESTCONTAINERS_RYUK_DISABLED: "true"
+      SPRING_TESTCONTAINERS_ENABLED: "false"
     depends_on:
       redis:
         condition: service_healthy
