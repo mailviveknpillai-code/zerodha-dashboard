@@ -15,7 +15,7 @@ export default function StrikePriceMonitoring() {
       try {
         console.log('🚀 StrikePriceMonitoring: Loading strike price monitoring data...');
         if (isInitialLoad) setLoading(true);
-        const data = await fetchStrikePriceMonitoring('NIFTY', 25000);
+        const data = await fetchStrikePriceMonitoring('NIFTY');
         console.log('✅ StrikePriceMonitoring: Data loaded:', data);
         if (mounted) {
           setMonitoringData(data);
@@ -154,7 +154,7 @@ export default function StrikePriceMonitoring() {
           <div className="bg-gray-50 dark:bg-slate-700 rounded-lg p-4">
             <h4 className="font-bold text-lg text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
               <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
-              Around Strike Price (±50 points)
+              ATM Options (At-The-Money)
             </h4>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -178,7 +178,7 @@ export default function StrikePriceMonitoring() {
                     ];
                     const aroundStrike = allContracts.filter(contract => {
                       const strike = contract.strikePrice || 0;
-                      const spot = monitoringData.spotPrice || 25000;
+                      const spot = monitoringData.spotPrice || null;
                       return Math.abs(strike - spot) <= 50;
                     });
                     return aroundStrike.length > 0 ? 
@@ -194,7 +194,7 @@ export default function StrikePriceMonitoring() {
           <div className="bg-gray-50 dark:bg-slate-700 rounded-lg p-4">
             <h4 className="font-bold text-lg text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
               <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-              Above Strike Price (+50 points)
+              Above Strike (OTM Calls / ITM Puts)
             </h4>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -218,7 +218,7 @@ export default function StrikePriceMonitoring() {
                     ];
                     const aboveStrike = allContracts.filter(contract => {
                       const strike = contract.strikePrice || 0;
-                      const spot = monitoringData.spotPrice || 25000;
+                      const spot = monitoringData.spotPrice || null;
                       return strike > spot + 50;
                     });
                     return aboveStrike.length > 0 ? 
@@ -234,7 +234,7 @@ export default function StrikePriceMonitoring() {
           <div className="bg-gray-50 dark:bg-slate-700 rounded-lg p-4">
             <h4 className="font-bold text-lg text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
               <span className="w-2 h-2 bg-red-500 rounded-full"></span>
-              Below Strike Price (-50 points)
+              Below Strike (ITM Calls / OTM Puts)
             </h4>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -258,7 +258,7 @@ export default function StrikePriceMonitoring() {
                     ];
                     const belowStrike = allContracts.filter(contract => {
                       const strike = contract.strikePrice || 0;
-                      const spot = monitoringData.spotPrice || 25000;
+                      const spot = monitoringData.spotPrice || null;
                       return strike < spot - 50;
                     });
                     return belowStrike.length > 0 ? 

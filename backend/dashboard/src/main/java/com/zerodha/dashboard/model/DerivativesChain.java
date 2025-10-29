@@ -17,7 +17,7 @@ public class DerivativesChain {
     private List<DerivativeContract> callOptions;
     private List<DerivativeContract> putOptions;
     private Instant timestamp;
-    private String dataSource; // ALPHA_VANTAGE, ZERODHA, MOCK
+    private String dataSource; // BREEZE_API, ZERODHA_KITE, NO_DATA
 
     public DerivativesChain() {
         this.futures = new ArrayList<>();

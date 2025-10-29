@@ -1,11 +1,13 @@
 package com.zerodha.dashboard.web;
 
-import com.zerodha.dashboard.adapter.DerivativesAdapter;
+import com.zerodha.dashboard.adapter.BreezeApiAdapter;
+import com.zerodha.dashboard.adapter.ZerodhaApiAdapter;
 import com.zerodha.dashboard.model.DerivativesChain;
 import com.zerodha.dashboard.model.DerivativeContract;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -27,7 +29,16 @@ public class StrikePriceMonitoringController {
     private static final Logger log = LoggerFactory.getLogger(StrikePriceMonitoringController.class);
     
     @Autowired
-    private DerivativesAdapter derivativesAdapter;
+    private BreezeApiAdapter breezeApiAdapter;
+    
+    @Autowired
+    private ZerodhaApiAdapter zerodhaApiAdapter;
+    
+    @Value("${breeze.api.enabled:true}")
+    private boolean breezeApiEnabled;
+    
+    @Value("${zerodha.enabled:false}")
+    private boolean zerodhaEnabled;
     
     /**
      * Get strike price monitoring data
@@ -41,7 +52,18 @@ public class StrikePriceMonitoringController {
         log.info("Strike price monitoring request: underlying={}, spot={}", underlying, spot);
         
         try {
-            Optional<DerivativesChain> chainOpt = derivativesAdapter.getDerivativesChain(spot);
+            Optional<DerivativesChain> chainOpt = Optional.empty();
+            
+            // Try Breeze API first if enabled
+            if (breezeApiEnabled) {
+                chainOpt = breezeApiAdapter.getDerivativesChain(underlying);
+            }
+            
+            // Fallback to Zerodha API if Breeze API is disabled or failed
+            if (chainOpt.isEmpty() && zerodhaEnabled) {
+                chainOpt = zerodhaApiAdapter.getDerivativesChain(underlying);
+            }
+            
             if (chainOpt.isEmpty()) {
                 return ResponseEntity.notFound().build();
             }
@@ -79,7 +101,18 @@ public class StrikePriceMonitoringController {
         log.info("Above strike price request: underlying={}, spot={}", underlying, spot);
         
         try {
-            Optional<DerivativesChain> chainOpt = derivativesAdapter.getDerivativesChain(spot);
+            Optional<DerivativesChain> chainOpt = Optional.empty();
+            
+            // Try Breeze API first if enabled
+            if (breezeApiEnabled) {
+                chainOpt = breezeApiAdapter.getDerivativesChain(underlying);
+            }
+            
+            // Fallback to Zerodha API if Breeze API is disabled or failed
+            if (chainOpt.isEmpty() && zerodhaEnabled) {
+                chainOpt = zerodhaApiAdapter.getDerivativesChain(underlying);
+            }
+            
             if (chainOpt.isEmpty()) {
                 return ResponseEntity.notFound().build();
             }
@@ -107,7 +140,18 @@ public class StrikePriceMonitoringController {
         log.info("Below strike price request: underlying={}, spot={}", underlying, spot);
         
         try {
-            Optional<DerivativesChain> chainOpt = derivativesAdapter.getDerivativesChain(spot);
+            Optional<DerivativesChain> chainOpt = Optional.empty();
+            
+            // Try Breeze API first if enabled
+            if (breezeApiEnabled) {
+                chainOpt = breezeApiAdapter.getDerivativesChain(underlying);
+            }
+            
+            // Fallback to Zerodha API if Breeze API is disabled or failed
+            if (chainOpt.isEmpty() && zerodhaEnabled) {
+                chainOpt = zerodhaApiAdapter.getDerivativesChain(underlying);
+            }
+            
             if (chainOpt.isEmpty()) {
                 return ResponseEntity.notFound().build();
             }

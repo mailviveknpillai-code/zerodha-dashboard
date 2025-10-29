@@ -14,8 +14,7 @@ const DashboardLayout = memo(function DashboardLayout() {
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
   const [blinkEnabled, setBlinkEnabled] = useState(true);
   const [animateEnabled, setAnimateEnabled] = useState(true);
-  const [derivativesData, setDerivativesData] = useState(null);
-  const mockData = useMemo(() => ({ spotLtp: 0, lotSize: 50, expiry: '30-Oct-2025' }), []);
+  // Removed mockData - using real API data only
   
   // Memoize selectedContract to prevent object recreation
   const memoizedSelectedContract = useMemo(() => selectedContract, [selectedContract?.tradingsymbol, selectedContract?.expiryDate]);
@@ -26,49 +25,56 @@ const DashboardLayout = memo(function DashboardLayout() {
     contractsCount: contracts.length
   });
 
-  // Load contracts and set default selection - only once on mount
+  // Load derivatives data and set default contract - single useEffect
   useEffect(() => {
-    const loadContracts = async () => {
-      try {
-        console.log('🔄 DashboardLayout: Loading contracts...');
-        const data = await fetchDerivatives('NIFTY', 25000);
-        if (data && data.futures) {
-          // Convert expiry dates to Date objects and sort by expiry
-          const futuresWithDates = data.futures.map(future => ({
-            ...future,
-            expiryDate: new Date(future.expiryDate)
-          })).sort((a, b) => a.expiryDate - b.expiryDate);
-          
-          setContracts(futuresWithDates);
-          
-          // Set the first contract (earliest expiry) as default
-          if (futuresWithDates.length > 0) {
-            setSelectedContract(futuresWithDates[0]);
-          }
-        }
-      } catch (error) {
-        console.error('Error loading contracts:', error);
-      }
-    };
+    let mounted = true;
+    let intervalId = null;
     
-    loadContracts();
-  }, []); // Only run once on mount
-
-  // Load derivatives data every 2 seconds
-  useEffect(() => {
     const loadDerivatives = async () => {
       try {
         console.log('🔄 DashboardLayout: Loading derivatives data...');
-        const data = await fetchDerivatives('NIFTY', 25000);
-        setDerivativesData(data);
+        const data = await fetchDerivatives('NIFTY');
+        
+        if (mounted) {
+          // Set contracts and default selection only on first load
+          if (data && data.futures && contracts.length === 0) {
+            console.log('🔄 DashboardLayout: Setting up contracts...');
+            // Convert expiry dates to Date objects and sort by expiry
+            const futuresWithDates = data.futures.map(future => ({
+              ...future,
+              expiryDate: new Date(future.expiryDate)
+            })).sort((a, b) => a.expiryDate - b.expiryDate);
+            
+            setContracts(futuresWithDates);
+            
+            // Set the first contract (earliest expiry - current month) as default
+            if (futuresWithDates.length > 0 && !selectedContract) {
+              console.log('🔄 DashboardLayout: Setting default contract:', futuresWithDates[0].tradingsymbol);
+              setSelectedContract(futuresWithDates[0]);
+            }
+          }
+        }
       } catch (error) {
         console.error('Error loading derivatives data:', error);
       }
     };
     
+    // Load data immediately
     loadDerivatives();
-    const interval = setInterval(loadDerivatives, 2000);
-    return () => clearInterval(interval);
+    
+    // Set up interval for updates
+    intervalId = setInterval(() => {
+      if (mounted) {
+        loadDerivatives();
+      }
+    }, 2000);
+    
+    return () => {
+      mounted = false;
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
   }, []); // Only run once on mount
 
   const handleContractSelect = useCallback((contract) => {
@@ -104,12 +110,11 @@ const DashboardLayout = memo(function DashboardLayout() {
           onContractSelect={handleContractSelect}
         />
             <main className="flex-1 p-4 space-y-3">
-              <MarketSummary symbol={selected} data={mockData} />
+              <MarketSummary symbol={selected} />
               <DerivativesDashboard 
                 selectedContract={memoizedSelectedContract}
                 blinkEnabled={blinkEnabled}
                 animateEnabled={animateEnabled}
-                derivativesData={derivativesData}
               />
             </main>
         {isRightPanelOpen && (

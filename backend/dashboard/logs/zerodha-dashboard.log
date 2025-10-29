@@ -1,0 +1,36 @@
+2025-10-21T14:08:25.203+05:30  INFO 14796 --- [restartedMain] c.z.d.ZerodhaDashboardApplication        : Starting ZerodhaDashboardApplication using Java 21.0.8 with PID 14796 (C:\vivek\freelance\zerodha-dashboard\backend\dashboard\target\classes started by vivek in C:\vivek\freelance\zerodha-dashboard\backend\dashboard)
+2025-10-21T14:08:25.207+05:30 DEBUG 14796 --- [restartedMain] c.z.d.ZerodhaDashboardApplication        : Running with Spring Boot v3.5.6, Spring v6.2.11
+2025-10-21T14:08:25.208+05:30  INFO 14796 --- [restartedMain] c.z.d.ZerodhaDashboardApplication        : No active profile set, falling back to 1 default profile: "default"
+2025-10-21T14:08:25.313+05:30  INFO 14796 --- [restartedMain] .e.DevToolsPropertyDefaultsPostProcessor : Devtools property defaults active! Set 'spring.devtools.add-properties' to 'false' to disable
+2025-10-21T14:08:25.314+05:30  INFO 14796 --- [restartedMain] .e.DevToolsPropertyDefaultsPostProcessor : For additional web related logging consider setting the 'logging.level.web' property to 'DEBUG'
+2025-10-21T14:08:26.754+05:30  INFO 14796 --- [restartedMain] .s.d.r.c.RepositoryConfigurationDelegate : Multiple Spring Data modules found, entering strict repository configuration mode
+2025-10-21T14:08:26.761+05:30  INFO 14796 --- [restartedMain] .s.d.r.c.RepositoryConfigurationDelegate : Bootstrapping Spring Data Redis repositories in DEFAULT mode.
+2025-10-21T14:08:26.835+05:30  INFO 14796 --- [restartedMain] .s.d.r.c.RepositoryConfigurationDelegate : Finished Spring Data repository scanning in 37 ms. Found 0 Redis repository interfaces.
+2025-10-21T14:08:27.980+05:30  INFO 14796 --- [restartedMain] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port 8080 (http)
+2025-10-21T14:08:28.042+05:30  INFO 14796 --- [restartedMain] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+2025-10-21T14:08:28.044+05:30  INFO 14796 --- [restartedMain] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/10.1.46]
+2025-10-21T14:08:28.161+05:30  INFO 14796 --- [restartedMain] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
+2025-10-21T14:08:28.161+05:30  INFO 14796 --- [restartedMain] w.s.c.ServletWebServerApplicationContext : Root WebApplicationContext: initialization completed in 2846 ms
+2025-10-21T14:08:30.092+05:30  INFO 14796 --- [restartedMain] o.s.b.d.a.OptionalLiveReloadServer       : LiveReload server is running on port 35729
+2025-10-21T14:08:30.164+05:30  INFO 14796 --- [restartedMain] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port 8080 (http) with context path '/'
+2025-10-21T14:08:30.181+05:30  INFO 14796 --- [restartedMain] c.z.d.ZerodhaDashboardApplication        : Started ZerodhaDashboardApplication in 6.065 seconds (process running for 6.843)
+2025-10-21T14:43:04.537+05:30  INFO 14796 --- [SpringApplicationShutdownHook] o.s.b.w.e.tomcat.GracefulShutdown        : Commencing graceful shutdown. Waiting for active requests to complete
+2025-10-21T14:43:04.945+05:30  INFO 14796 --- [tomcat-shutdown] o.s.b.w.e.tomcat.GracefulShutdown        : Graceful shutdown complete
+2025-10-21T14:49:14.359+05:30  INFO 12640 --- [restartedMain] c.z.d.ZerodhaDashboardApplication        : Starting ZerodhaDashboardApplication using Java 21.0.8 with PID 12640 (C:\vivek\freelance\zerodha-dashboard\backend\dashboard\target\classes started by vivek in C:\vivek\freelance\zerodha-dashboard\backend\dashboard)
+2025-10-21T14:49:14.367+05:30 DEBUG 12640 --- [restartedMain] c.z.d.ZerodhaDashboardApplication        : Running with Spring Boot v3.5.6, Spring v6.2.11
+2025-10-21T14:49:14.367+05:30  INFO 12640 --- [restartedMain] c.z.d.ZerodhaDashboardApplication        : No active profile set, falling back to 1 default profile: "default"
+2025-10-21T14:49:14.439+05:30  INFO 12640 --- [restartedMain] .e.DevToolsPropertyDefaultsPostProcessor : Devtools property defaults active! Set 'spring.devtools.add-properties' to 'false' to disable
+2025-10-21T14:49:14.439+05:30  INFO 12640 --- [restartedMain] .e.DevToolsPropertyDefaultsPostProcessor : For additional web related logging consider setting the 'logging.level.web' property to 'DEBUG'
+2025-10-21T14:49:15.745+05:30  INFO 12640 --- [restartedMain] .s.d.r.c.RepositoryConfigurationDelegate : Multiple Spring Data modules found, entering strict repository configuration mode
+2025-10-21T14:49:15.760+05:30  INFO 12640 --- [restartedMain] .s.d.r.c.RepositoryConfigurationDelegate : Bootstrapping Spring Data Redis repositories in DEFAULT mode.
+2025-10-21T14:49:15.823+05:30  INFO 12640 --- [restartedMain] .s.d.r.c.RepositoryConfigurationDelegate : Finished Spring Data repository scanning in 29 ms. Found 0 Redis repository interfaces.
+2025-10-21T14:49:16.746+05:30  INFO 12640 --- [restartedMain] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port 8080 (http)
+2025-10-21T14:49:16.782+05:30  INFO 12640 --- [restartedMain] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+2025-10-21T14:49:16.786+05:30  INFO 12640 --- [restartedMain] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/10.1.46]
+2025-10-21T14:49:16.866+05:30  INFO 12640 --- [restartedMain] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
+2025-10-21T14:49:16.866+05:30  INFO 12640 --- [restartedMain] w.s.c.ServletWebServerApplicationContext : Root WebApplicationContext: initialization completed in 2421 ms
+2025-10-21T14:49:18.227+05:30  INFO 12640 --- [restartedMain] o.s.b.d.a.OptionalLiveReloadServer       : LiveReload server is running on port 35729
+2025-10-21T14:49:18.284+05:30  INFO 12640 --- [restartedMain] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port 8080 (http) with context path '/'
+2025-10-21T14:49:18.296+05:30  INFO 12640 --- [restartedMain] c.z.d.ZerodhaDashboardApplication        : Started ZerodhaDashboardApplication in 4.724 seconds (process running for 5.377)
+2025-10-21T14:50:44.636+05:30  INFO 12640 --- [SpringApplicationShutdownHook] o.s.b.w.e.tomcat.GracefulShutdown        : Commencing graceful shutdown. Waiting for active requests to complete
+2025-10-21T14:50:44.700+05:30  INFO 12640 --- [tomcat-shutdown] o.s.b.w.e.tomcat.GracefulShutdown        : Graceful shutdown complete

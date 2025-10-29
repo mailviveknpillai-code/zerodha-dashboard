@@ -1,18 +1,31 @@
 import React, { useEffect, useState } from 'react';
 import { fetchDerivatives } from '../api/client';
 
-export default function MarketSummary({ symbol, data }) {
-  const [spot, setSpot] = useState(data?.spotLtp ?? null);
+export default function MarketSummary({ symbol }) {
+  const [spot, setSpot] = useState(null);
+  const [lotSize, setLotSize] = useState(null);
+  const [expiry, setExpiry] = useState(null);
 
   useEffect(() => {
     let mounted = true;
     const load = async () => {
       try {
-        // Use mock derivatives data instead of alpha-demo
-        const derivativesData = await fetchDerivatives(symbol, 25000);
-        if (mounted && derivativesData && derivativesData.spotPrice) {
-          const val = Number(derivativesData.spotPrice);
-          setSpot(val);
+        // Use Breeze API derivatives data
+        const derivativesData = await fetchDerivatives(symbol);
+        if (mounted && derivativesData) {
+          if (derivativesData.spotPrice) {
+            setSpot(Number(derivativesData.spotPrice));
+          }
+          if (derivativesData.lotSize) {
+            setLotSize(derivativesData.lotSize);
+          }
+          if (derivativesData.futures && derivativesData.futures.length > 0) {
+            // Get the earliest expiry date
+            const earliestFuture = derivativesData.futures.reduce((earliest, current) => {
+              return new Date(current.expiryDate) < new Date(earliest.expiryDate) ? current : earliest;
+            });
+            setExpiry(new Date(earliestFuture.expiryDate).toLocaleDateString('en-GB'));
+          }
         }
       } catch (error) {
         console.error('Error loading spot price:', error);
@@ -39,11 +52,11 @@ export default function MarketSummary({ symbol, data }) {
             </span>
             <span className="flex items-center gap-1">
               <span className="w-2 h-2 bg-purple-500 rounded-full"></span>
-              Lot size: <span className="font-semibold text-gray-900">{data?.lotSize ?? 300}</span>
+              Lot size: <span className="font-semibold text-gray-900">{lotSize ?? '—'}</span>
             </span>
             <span className="flex items-center gap-1">
               <span className="w-2 h-2 bg-orange-500 rounded-full"></span>
-              Expiry: <span className="font-semibold text-gray-900">{data?.expiry ?? '30-Oct-2025'}</span>
+              Expiry: <span className="font-semibold text-gray-900">{expiry ?? '—'}</span>
             </span>
           </div>
         </div>

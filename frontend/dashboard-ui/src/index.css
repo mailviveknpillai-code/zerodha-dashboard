@@ -117,27 +117,25 @@ th, td {
 
   /* Light mode section headings - subtle and non-overpowering */
   .section-header {
-    background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
-    color: #ffffff;
-    font-weight: 700;
+    background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
+    color: #475569;
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-    border-left: 4px solid #1d4ed8;
+    border-left: 4px solid #3b82f6;
     position: relative;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
   }
 
   .section-subheader {
-    background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-    color: #f8fafc;
-    font-weight: 600;
+    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+    color: #64748b;
+    font-weight: 500;
     text-transform: uppercase;
     letter-spacing: 0.03em;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
     border-left: 3px solid #06b6d4;
     position: relative;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
   }
 
   /* Enhanced number styling for better visibility */
@@ -251,3 +249,52 @@ th, td {
   .dark .puts-section {
     background-color: rgba(239, 68, 68, 0.1);
   }
+
+/* Price Movement Tracking Halo Effect */
+@keyframes price-halo {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.8; }
+}
+
+.price-tracking-cell {
+  position: relative;
+  transition: all 0.3s ease;
+}
+
+/* Red halo for downward movement */
+.price-tracking-red-light {
+  box-shadow: inset 0 0 0 2px rgba(239, 68, 68, 0.3);
+}
+
+.price-tracking-red-medium {
+  box-shadow: inset 0 0 0 3px rgba(239, 68, 68, 0.5);
+}
+
+.price-tracking-red-dark {
+  box-shadow: inset 0 0 0 4px rgba(220, 38, 38, 0.7), 0 0 8px rgba(220, 38, 38, 0.3);
+  animation: price-halo 2s ease-in-out infinite;
+}
+
+.price-tracking-red-intense {
+  box-shadow: inset 0 0 0 5px rgba(185, 28, 28, 0.9), 0 0 12px rgba(185, 28, 28, 0.5);
+  animation: price-halo 1.5s ease-in-out infinite;
+}
+
+/* Green halo for upward movement */
+.price-tracking-green-light {
+  box-shadow: inset 0 0 0 2px rgba(34, 197, 94, 0.3);
+}
+
+.price-tracking-green-medium {
+  box-shadow: inset 0 0 0 3px rgba(34, 197, 94, 0.5);
+}
+
+.price-tracking-green-dark {
+  box-shadow: inset 0 0 0 4px rgba(22, 163, 74, 0.7), 0 0 8px rgba(22, 163, 74, 0.3);
+  animation: price-halo 2s ease-in-out infinite;
+}
+
+.price-tracking-green-intense {
+  box-shadow: inset 0 0 0 5px rgba(21, 128, 61, 0.9), 0 0 12px rgba(21, 128, 61, 0.5);
+  animation: price-halo 1.5s ease-in-out infinite;
+}

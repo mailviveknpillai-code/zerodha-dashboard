@@ -1,0 +1,88 @@
+Subject: Request to Enable Port Forwarding on My Router
+
+Dear [ISP Name] Support Team,
+
+I am writing to request assistance with enabling port forwarding on my internet connection. I am a software developer and need to configure port forwarding for API callback functionality, but the router configuration interface is not allowing me to make these changes.
+
+**Account Details:**
+- Account Holder Name: [Your Name]
+- Account Number/Customer ID: [Your Account Number]
+- Service Address: [Your Address]
+- Public IP Address: 122.167.184.90
+- Router Model: DZSI H660GM-A (Model: H660GM-A)
+- Router MAC Address: 30:4F:75:B2:91:18
+
+**Technical Request:**
+I need either port forwarding OR DMZ configured with the following settings:
+
+**Option 1: Port Forwarding (Preferred)**
+- External Port: 8080 (TCP)
+- Internal IP Address: 192.168.1.8
+- Internal Port: 8080 (TCP)
+- Protocol: TCP
+- Purpose: ICICI Direct Breeze API OAuth callback endpoint
+
+**Option 2: DMZ (Alternative)**
+- DMZ Host IP Address: 192.168.1.8
+- This will expose all ports from my PC to the internet
+- Purpose: Same as above if port forwarding cannot be enabled
+
+**Issue Description:**
+When I attempt to configure these settings through the router's web interface (http://192.168.1.1), I receive the following errors:
+- Port Forwarding: "Cannot set port forwarding common"
+- DMZ Configuration: "Could not set Demilitarized Zone (DMZ)!"
+
+This indicates the router is ISP-managed and locked from user configuration.
+
+I have verified that:
+1. My public IP address (122.167.184.90) is not behind CGNAT
+2. Windows Firewall is configured to allow port 8080
+3. The service is running locally and accessible at localhost:8080
+4. UPnP is enabled on the router but does not expose port mapping API
+5. Both Port Forwarding and DMZ configuration interfaces are blocked
+
+**What I Need:**
+Please help me by doing ONE of the following:
+1. **Configure port forwarding remotely** for external port 8080 → internal IP 192.168.1.8 port 8080 (TCP), OR
+2. **Enable DMZ remotely** for host IP 192.168.1.8, OR
+3. **Unlock the router configuration** so I can configure port forwarding/DMZ myself, OR
+4. **Put the router in bridge/passthrough mode** so I can use my own router
+
+**Business Justification:**
+I am integrating with ICICI Direct's Breeze API for financial trading applications. The API requires a publicly accessible callback URL (http://122.167.184.90:8080/api/breeze/callback) that is already registered with ICICI Direct and cannot be changed. Without port forwarding, I cannot complete the OAuth authentication flow required for this integration.
+
+**Urgency:**
+This is blocking critical development work. I would greatly appreciate if this could be resolved within 24-48 hours.
+
+Please let me know if you need any additional information or if a technician needs remote access to my router to configure this.
+
+Thank you for your assistance.
+
+Best regards,
+[Your Name]
+[Your Phone Number]
+[Your Email Address]
+
+---
+
+TECHNICAL NOTES FOR SUPPORT STAFF:
+- Router login: http://192.168.1.1 (admin credentials)
+- Router LAN IP: 192.168.1.1
+- Client PC LAN IP: 192.168.1.8 (requires DHCP reservation for stability)
+
+**Option 1 - Port Forwarding Configuration:**
+- WAN Interface: WAN1
+- Required NAT rule: WAN:8080 → 192.168.1.8:8080 (TCP)
+- Protocol: TCP (or TCP/UDP)
+- Navigation: Firewall Setup → NAT Forwarding → Port Forwarding
+
+**Option 2 - DMZ Configuration:**
+- DMZ Host IP: 192.168.1.8
+- WAN Interface: WAN1
+- Navigation: Firewall Setup → NAT Forwarding → DMZ
+
+**Verification:**
+- Windows Firewall: Already configured to allow TCP 8080
+- Local service verified working: curl http://localhost:8080/api/breeze/status returns HTTP 200
+- External test URL: http://122.167.184.90:8080/api/breeze/status
+
