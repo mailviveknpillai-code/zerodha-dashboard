@@ -6,13 +6,26 @@ export default function OptionsTable({
   data, 
   blinkEnabled, 
   animateEnabled, 
-  dailyStrikePrice 
+  dailyStrikePrice,
+  collapsible = false,
+  collapsed = false,
+  onToggle,
+  headerExtras = null
 }) {
   // Track starting values for price movement monitoring
   const startingValuesRef = useRef(new Map());
 
+  const extractPairValue = (value, partIndex) => {
+    if (!value || value === '-' || value === '—') return '-';
+    const parts = String(value).split('/');
+    if (parts.length <= partIndex) return String(value);
+    const part = parts[partIndex].trim();
+    return part !== '' ? part : '-';
+  };
+
   // Track starting values for each cell independently
   useEffect(() => {
+    if (collapsed) return;
     if (data && data.length > 0) {
       data.forEach((row, index) => {
         if (row.isHeader || row.isSubHeader) return;
@@ -50,7 +63,7 @@ export default function OptionsTable({
         if (row.bid && row.bid !== '-' && row.bid !== '—') {
           const bidKey = `${baseKey}-bid`;
           if (!startingValuesRef.current.has(bidKey)) {
-            const numValue = Number(row.bid.split('/')[0]);
+            const numValue = Number(extractPairValue(row.bid, 0));
             if (!isNaN(numValue)) startingValuesRef.current.set(bidKey, numValue);
           }
         }
@@ -59,7 +72,7 @@ export default function OptionsTable({
         if (row.ask && row.ask !== '-' && row.ask !== '—') {
           const askKey = `${baseKey}-ask`;
           if (!startingValuesRef.current.has(askKey)) {
-            const numValue = Number(row.ask.split('/')[1]);
+            const numValue = Number(extractPairValue(row.ask, 1));
             if (!isNaN(numValue)) startingValuesRef.current.set(askKey, numValue);
           }
         }
@@ -68,7 +81,7 @@ export default function OptionsTable({
         if (row.bidQty && row.bidQty !== '-' && row.bidQty !== '—') {
           const bidQtyKey = `${baseKey}-bidQty`;
           if (!startingValuesRef.current.has(bidQtyKey)) {
-            const numValue = Number(row.bidQty.split('/')[0]);
+            const numValue = Number(extractPairValue(row.bidQty, 0).replace(/,/g, ''));
             if (!isNaN(numValue)) startingValuesRef.current.set(bidQtyKey, numValue);
           }
         }
@@ -77,7 +90,7 @@ export default function OptionsTable({
         if (row.askQty && row.askQty !== '-' && row.askQty !== '—') {
           const askQtyKey = `${baseKey}-askQty`;
           if (!startingValuesRef.current.has(askQtyKey)) {
-            const numValue = Number(row.askQty.split('/')[1]);
+            const numValue = Number(extractPairValue(row.askQty, 1).replace(/,/g, ''));
             if (!isNaN(numValue)) startingValuesRef.current.set(askQtyKey, numValue);
           }
         }
@@ -101,7 +114,7 @@ export default function OptionsTable({
         }
       });
     }
-  }, [data]);
+  }, [data, collapsed]);
   // Helper function to get color coding for LTP based on value
   const getLTPColor = (ltp, isHeader, isSubHeader) => {
     if (isHeader || isSubHeader) return 'text-gray-500';
@@ -160,7 +173,6 @@ export default function OptionsTable({
     return 'price-neutral'; // LTP at ask
   };
 
-  // Helper function to get color coding for Bid Qty based on LTP movement
   const getBidQtyColor = (bidQty, ltp, isHeader, isSubHeader) => {
     if (isHeader || isSubHeader) return 'text-gray-500';
     if (!bidQty || bidQty === '-' || bidQty === '—') return 'text-gray-400';
@@ -204,111 +216,128 @@ export default function OptionsTable({
     );
   };
 
-  if (!data || data.length === 0) {
-    return null;
-  }
+  const hasData = Array.isArray(data) && data.length > 0;
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden mb-6">
       <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-4 border-b border-gray-200">
-        <h3 className="font-bold text-lg text-gray-900">{title}</h3>
-      </div>
-      <div>
-      <table className="w-full text-sm">
-        <thead className="bg-gray-50 text-gray-600 text-xs font-semibold">
-          <tr>
-            <th className="text-left px-4 py-3">Segment</th>
-            <th className="px-4 py-3">LTP</th>
-            <th className="px-4 py-3">Δ Price</th>
-            <th className="px-4 py-3">%Δ</th>
-            <th className="px-4 py-3">OI</th>
-            <th className="px-4 py-3">Vol</th>
-            <th className="px-4 py-3">Bid</th>
-            <th className="px-4 py-3">Ask</th>
-            <th className="px-4 py-3">Bid Qty</th>
-            <th className="px-4 py-3">Ask Qty</th>
-          </tr>
-        </thead>
-          <tbody>
-            {data.map((row, i) => {
-              const baseKey = row.instrumentToken || `${row.tradingsymbol || row.segment}-${i}`;
-              
-              return (
-              <tr 
-                key={i} 
-                className={`border-b last:border-0 hover:bg-blue-50 ${
-                  row.isHeader ? 'section-header' : 
-                  row.isSubHeader ? 'section-subheader' : 
-                  row.sectionType === 'calls' ? 'calls-section' :
-                  row.sectionType === 'puts' ? 'puts-section' : ''
-                }`}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h3 className="font-bold text-lg text-gray-900">{title}</h3>
+          <div className="flex items-center gap-3">
+            {headerExtras}
+            {collapsible && (
+              <button
+                type="button"
+                onClick={onToggle}
+                className="w-8 h-8 flex items-center justify-center text-xl font-bold text-gray-600 hover:text-gray-900 hover:bg-gray-200 rounded-full transition-colors"
+                aria-label={collapsed ? 'Expand table' : 'Collapse table'}
               >
-                <td className={`py-3 px-4 whitespace-nowrap ${
-                  row.isHeader ? 'text-lg font-bold text-white' : 
-                  row.isSubHeader ? 'text-sm pl-6 font-semibold text-white' : 
-                  'pl-8'
-                }`}>
-                  {row.segment}
-                </td>
-                  <td className={`py-3 px-4 data-cell ${
-                    getPriceTrackingClass(row.ltp, startingValuesRef.current.get(`${baseKey}-ltp`), row.isHeader || row.isSubHeader)
-                  } ${getLTPColor(row.ltp, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
-                    {row.ltp}
-                  </td>
-                  <td className={`py-3 px-4 data-cell ${
-                    getPriceTrackingClass(row.change ? Number(row.change) : 0, startingValuesRef.current.get(`${baseKey}-change`), row.isHeader || row.isSubHeader)
-                  } ${row.isHeader || row.isSubHeader ? 'text-gray-500' :
-                    Number(row.change) > 0 ? 'price-up' : 
-                    Number(row.change) < 0 ? 'price-down' : 'price-neutral'
-                  } ${animateEnabled && !row.isHeader && !row.isSubHeader ? 
-                    (Number(row.change) > 0 ? 'delta-animate-up' : 
-                     Number(row.change) < 0 ? 'delta-animate-down' : '') : ''}`}>
-                    {row.change}
-                  </td>
-                  <td className={`py-3 px-4 data-cell ${
-                    getPriceTrackingClass(row.changePercent ? Number(row.changePercent) : 0, startingValuesRef.current.get(`${baseKey}-changePercent`), row.isHeader || row.isSubHeader)
-                  } ${row.isHeader || row.isSubHeader ? 'text-gray-500' :
-                    Number(row.changePercent) > 0 ? 'price-up' : 
-                    Number(row.changePercent) < 0 ? 'price-down' : 'price-neutral'
-                  }`}>
-                    {row.changePercent ? `${row.changePercent}%` : '—'}
-                  </td>
-                  <td className={`py-3 px-4 data-cell ${
-                    getPriceTrackingClass(row.oi ? Number(row.oi.replace(/,/g, '')) : 0, startingValuesRef.current.get(`${baseKey}-oi`), row.isHeader || row.isSubHeader)
-                  } ${getOIColor(row.oi, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
-                    {row.oi}
-                  </td>
-                  <td className={`py-3 px-4 data-cell ${
-                    getPriceTrackingClass(row.vol ? Number(row.vol.replace(/,/g, '')) : 0, startingValuesRef.current.get(`${baseKey}-vol`), row.isHeader || row.isSubHeader)
-                  } ${getVolumeColor(row.vol, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
-                    {row.vol}
-                  </td>
-                  <td className={`py-3 px-4 data-cell ${
-                    getPriceTrackingClass(row.bid ? Number(row.bid.split('/')[0]) : 0, startingValuesRef.current.get(`${baseKey}-bid`), row.isHeader || row.isSubHeader)
-                  } ${getBidColor(row.bid, row.ltp, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
-                    {row.bid ? row.bid.split('/')[0] : '-'}
-                  </td>
-                  <td className={`py-3 px-4 data-cell ${
-                    getPriceTrackingClass(row.ask ? Number(row.ask.split('/')[1]) : 0, startingValuesRef.current.get(`${baseKey}-ask`), row.isHeader || row.isSubHeader)
-                  } ${getAskColor(row.ask, row.ltp, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
-                    {row.ask ? row.ask.split('/')[1] : '-'}
-                  </td>
-                  <td className={`py-3 px-4 data-cell ${
-                    getPriceTrackingClass(row.bidQty ? Number(row.bidQty.split('/')[0]) : 0, startingValuesRef.current.get(`${baseKey}-bidQty`), row.isHeader || row.isSubHeader)
-                  } ${getBidQtyColor(row.bidQty, row.ltp, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
-                    {row.bidQty ? row.bidQty.split('/')[0] : '-'}
-                  </td>
-                  <td className={`py-3 px-4 data-cell ${
-                    getPriceTrackingClass(row.askQty ? Number(row.askQty.split('/')[1]) : 0, startingValuesRef.current.get(`${baseKey}-askQty`), row.isHeader || row.isSubHeader)
-                  } ${getAskQtyColor(row.askQty, row.ltp, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
-                    {row.askQty ? row.askQty.split('/')[1] : '-'}
-                  </td>
-              </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                {collapsed ? '+' : '−'}
+              </button>
+            )}
+          </div>
+        </div>
       </div>
+      {!collapsed && (hasData ? (
+        <div>
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 text-gray-600 text-xs font-semibold">
+            <tr>
+              <th className="text-left px-4 py-3">Segment</th>
+              <th className="px-4 py-3">LTP</th>
+              <th className="px-4 py-3">Δ Price</th>
+              <th className="px-4 py-3">%Δ</th>
+              <th className="px-4 py-3">OI</th>
+              <th className="px-4 py-3">Vol</th>
+              <th className="px-4 py-3">Bid</th>
+              <th className="px-4 py-3">Ask</th>
+              <th className="px-4 py-3">Bid Qty</th>
+              <th className="px-4 py-3">Ask Qty</th>
+            </tr>
+          </thead>
+            <tbody>
+              {data.map((row, i) => {
+                const baseKey = row.instrumentToken || `${row.tradingsymbol || row.segment}-${i}`;
+                
+                return (
+                <tr 
+                  key={i} 
+                  className={`border-b last:border-0 hover:bg-blue-50 ${
+                    row.isHeader ? 'section-header' : 
+                    row.isSubHeader ? 'section-subheader' : 
+                    row.sectionType === 'calls' ? 'calls-section' :
+                    row.sectionType === 'puts' ? 'puts-section' : ''
+                  }`}
+                >
+                  <td className={`py-3 px-4 whitespace-nowrap ${
+                    row.isHeader ? 'text-lg font-bold text-white' : 
+                    row.isSubHeader ? 'text-sm pl-6 font-semibold text-white' : 
+                    'pl-8'
+                  }`}>
+                    {row.segment}
+                  </td>
+                    <td className={`py-3 px-4 data-cell ${
+                      getPriceTrackingClass(row.ltp, startingValuesRef.current.get(`${baseKey}-ltp`), row.isHeader || row.isSubHeader)
+                    } ${getLTPColor(row.ltp, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
+                      {row.ltp}
+                    </td>
+                    <td className={`py-3 px-4 data-cell ${
+                      getPriceTrackingClass(row.change ? Number(row.change) : 0, startingValuesRef.current.get(`${baseKey}-change`), row.isHeader || row.isSubHeader)
+                    } ${row.isHeader || row.isSubHeader ? 'text-gray-500' :
+                      Number(row.change) > 0 ? 'price-up' : 
+                      Number(row.change) < 0 ? 'price-down' : 'price-neutral'
+                    } ${animateEnabled && !row.isHeader && !row.isSubHeader ? 
+                      (Number(row.change) > 0 ? 'delta-animate-up' : 
+                       Number(row.change) < 0 ? 'delta-animate-down' : '') : ''}`}>
+                      {row.change}
+                    </td>
+                    <td className={`py-3 px-4 data-cell ${
+                      getPriceTrackingClass(row.changePercent ? Number(row.changePercent) : 0, startingValuesRef.current.get(`${baseKey}-changePercent`), row.isHeader || row.isSubHeader)
+                    } ${row.isHeader || row.isSubHeader ? 'text-gray-500' :
+                      Number(row.changePercent) > 0 ? 'price-up' : 
+                      Number(row.changePercent) < 0 ? 'price-down' : 'price-neutral'
+                    }`}>
+                      {row.changePercent ? `${row.changePercent}%` : '—'}
+                    </td>
+                    <td className={`py-3 px-4 data-cell ${
+                      getPriceTrackingClass(row.oi ? Number(row.oi.replace(/,/g, '')) : 0, startingValuesRef.current.get(`${baseKey}-oi`), row.isHeader || row.isSubHeader)
+                    } ${getOIColor(row.oi, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
+                      {row.oi}
+                    </td>
+                    <td className={`py-3 px-4 data-cell ${
+                      getPriceTrackingClass(row.vol ? Number(row.vol.replace(/,/g, '')) : 0, startingValuesRef.current.get(`${baseKey}-vol`), row.isHeader || row.isSubHeader)
+                    } ${getVolumeColor(row.vol, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
+                      {row.vol}
+                    </td>
+                    <td className={`py-3 px-4 data-cell ${
+                      getPriceTrackingClass(row.bid ? Number(extractPairValue(row.bid, 0)) : 0, startingValuesRef.current.get(`${baseKey}-bid`), row.isHeader || row.isSubHeader)
+                    } ${getBidColor(extractPairValue(row.bid, 0), row.ltp, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
+                      {extractPairValue(row.bid, 0)}
+                    </td>
+                    <td className={`py-3 px-4 data-cell ${
+                      getPriceTrackingClass(row.ask ? Number(extractPairValue(row.ask, 1)) : 0, startingValuesRef.current.get(`${baseKey}-ask`), row.isHeader || row.isSubHeader)
+                    } ${getAskColor(extractPairValue(row.ask, 1), row.ltp, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
+                      {extractPairValue(row.ask, 1)}
+                    </td>
+                    <td className={`py-3 px-4 data-cell ${
+                      getPriceTrackingClass(row.bidQty ? Number(extractPairValue(row.bidQty, 0).replace(/,/g, '')) : 0, startingValuesRef.current.get(`${baseKey}-bidQty`), row.isHeader || row.isSubHeader)
+                    } ${getBidQtyColor(extractPairValue(row.bidQty, 0), row.ltp, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
+                      {extractPairValue(row.bidQty, 0)}
+                    </td>
+                    <td className={`py-3 px-4 data-cell ${
+                      getPriceTrackingClass(row.askQty ? Number(extractPairValue(row.askQty, 1).replace(/,/g, '')) : 0, startingValuesRef.current.get(`${baseKey}-askQty`), row.isHeader || row.isSubHeader)
+                    } ${getAskQtyColor(extractPairValue(row.askQty, 1), row.ltp, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
+                      {extractPairValue(row.askQty, 1)}
+                    </td>
+                </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="px-6 py-4 text-sm text-gray-500">No data available</div>
+      ))}
     </div>
   );
 }

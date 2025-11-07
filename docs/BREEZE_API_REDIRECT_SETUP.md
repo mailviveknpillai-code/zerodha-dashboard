@@ -3,6 +3,9 @@
 ## Problem
 The Breeze API redirect URI must be publicly accessible. ICICI's servers need to reach your callback endpoint from the internet.
 
+## ⚠️ IMPORTANT: Port Forwarding is NOT Required!
+**New users**: Skip Option 1 and 2 if your ISP blocks ports. Use **Option 3 (Cloud Tunneling)** instead - it's easier and works behind any firewall. See `BREEZE_NO_PORT_FORWARDING_ALTERNATIVES.md` for complete guide.
+
 ## Solution Options
 
 ### Option 1: Use Your Public IP (Temporary)
@@ -30,9 +33,23 @@ Best for permanent setup:
 
 5. Use HTTPS with Let's Encrypt certificate (optional but recommended)
 
-### Option 3: Use a Cloud Tunneling Service (Easiest for Testing)
-Services like ngrok provide a permanent domain:
+### Option 3: Use a Cloud Tunneling Service (RECOMMENDED - Easiest for Testing)
+**Bypasses ISP firewalls, CGNAT, and port forwarding completely!**
 
+#### A. Cloudflared (Already Installed!)
+```powershell
+# Run the setup script
+.\scripts\setup-cloudflared-tunnel.ps1
+
+# Or manually
+.\cloudflared.exe tunnel --url http://localhost:8080
+
+# Use the provided URL: https://your-random.trycloudflare.com
+```
+
+Register redirect URI: `https://your-random.trycloudflare.com/api/breeze/callback`
+
+#### B. ngrok (Alternative)
 ```bash
 # Install ngrok
 # Windows: Download from https://ngrok.com/download
@@ -44,6 +61,8 @@ ngrok http 8080
 ```
 
 Register redirect URI: `https://your-id.ngrok-free.app/api/breeze/callback`
+
+**For production with permanent URLs**, see `BREEZE_NO_PORT_FORWARDING_ALTERNATIVES.md`
 
 ## Current Configuration
 

@@ -31,34 +31,38 @@ services:
       dockerfile: dashboard/Dockerfile
     container_name: zerodha-backend
     ports:
-      - "8080:8080"
+      - "9000:9000"
     networks:
       zerodha-network:
         ipv4_address: 172.20.0.20
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      # Breeze API configuration (ENABLED)
-      BREEZE_API_ENABLED: "${BREEZE_API_ENABLED:-true}"
+      SERVER_PORT: 9000
+      # Breeze API configuration (DISABLED - Using Zerodha instead)
+      BREEZE_API_ENABLED: "${BREEZE_API_ENABLED:-false}"
       BREEZE_API_APPKEY: "${BREEZE_API_APPKEY:-2!T0h64f315119F87^2%8L60245j43p2}"
       BREEZE_API_SECRETKEY: "${BREEZE_API_SECRETKEY:-700U1T8l62632u`oT48`2456M6n62275}"
       BREEZE_API_SESSIONTOKEN: "${BREEZE_API_SESSIONTOKEN:-53489091}"
       # Static IP configuration for Breeze API
       BREEZE_API_STATIC_IP: "122.167.184.90"
       BREEZE_API_NETWORK_INTERFACE: "eth0"
-      # Zerodha Kite API (DISABLED)
-      ZERODHA_ENABLED: "${ZERODHA_ENABLED:-false}"
-      # Mock Data Configuration (DISABLED WHEN USING REAL API)
+      # Zerodha Kite API (ENABLED - Primary API)
+      ZERODHA_ENABLED: "${ZERODHA_ENABLED:-true}"
+      ZERODHA_API_KEY: "${ZERODHA_API_KEY:-hvgaaodyzyhzq57s}"
+      ZERODHA_API_SECRET: "${ZERODHA_API_SECRET:-r6t8jx9lk6xb1vrckgwrqi4owjd2u314}"
+      ZERODHA_REDIRECT_URI: "${ZERODHA_REDIRECT_URI:-https://zerodhadashboard.duckdns.org/api/zerodha/callback}"
+      ZERODHA_ACCESS_TOKEN: "63VhddceoKtjNczUZ6hAupIf4sXSHtTE"
+      # Updated: 2025-11-06 - Token refreshed via OAuth
+      # Mock Data Configuration (DISABLED when Zerodha is enabled)
       MOCK_DATA_ENABLED: "${MOCK_DATA_ENABLED:-false}"
       MOCK_SPOT_PRICE: "${MOCK_SPOT_PRICE:-25000}"
       MOCK_UNDERLYING: "${MOCK_UNDERLYING:-NIFTY}"
-      ZERODHA_API_KEY: "${ZERODHA_API_KEY:-}"
-      ZERODHA_ACCESS_TOKEN: "${ZERODHA_ACCESS_TOKEN:-}"
     depends_on:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9000/api/zerodha/status"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -69,7 +73,7 @@ services:
       context: ./frontend/dashboard-ui
       dockerfile: Dockerfile
       args:
-        - VITE_API_BASE_URL=http://backend:8080
+        - VITE_API_BASE_URL=http://backend:9000
     image: zerodha-dashboard-frontend:latest
     container_name: zerodha-frontend
     ports:
@@ -80,7 +84,7 @@ services:
     depends_on:
       - backend
     environment:
-      - VITE_API_BASE_URL=http://backend:8080
+      - VITE_API_BASE_URL=http://backend:9000
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost/ || exit 1"]
       interval: 10s
@@ -102,7 +106,7 @@ services:
         ipv4_address: 172.20.0.40
     command: sh -c "npm ci --legacy-peer-deps && npm run dev -- --host 0.0.0.0"
     environment:
-      - VITE_API_BASE_URL=http://backend:8080
+      - VITE_API_BASE_URL=http://backend:9000
     depends_on:
       - backend
 

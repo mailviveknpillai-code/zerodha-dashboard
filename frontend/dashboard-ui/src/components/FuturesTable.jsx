@@ -2,11 +2,17 @@ import React, { useMemo, useEffect, useState, useRef } from 'react';
 import { fetchDerivatives } from '../api/client';
 import { getPriceTrackingClass } from '../hooks/usePriceTracking';
 
-export default function FuturesTable({ spot, baseSymbol, selectedContract, blinkEnabled, animateEnabled, organizedData }) {
+export default function FuturesTable({ spot, baseSymbol, selectedContract, blinkEnabled, animateEnabled, organizedData, summaryStats = [] }) {
   const [loading, setLoading] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   // Track starting values for each row to enable price movement tracking
   const startingValuesRef = useRef(new Map());
+
+  const formatNumber = (value) => {
+    if (value === null || value === undefined || value === '') return '—';
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric.toLocaleString() : String(value);
+  };
 
   const enterFullscreen = async () => {
     try {
@@ -280,12 +286,20 @@ export default function FuturesTable({ spot, baseSymbol, selectedContract, blink
             </h3>
           </div>
           <div className="flex items-center gap-4">
-          {spot && (
-            <div className="flex items-center gap-4 text-sm">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-                <span className="font-semibold text-gray-700">Spot: ₹{spot}</span>
-              </div>
+          {summaryStats.length > 0 && (
+            <div className="flex flex-wrap items-center gap-4 text-xs sm:text-sm text-gray-900 dark:text-gray-100">
+              {summaryStats.map(stat => {
+                if (stat.value === null || stat.value === undefined || stat.value === '') {
+                  return null;
+                }
+                const displayValue = stat.format ? stat.format(stat.value) : formatNumber(stat.value);
+                return (
+                  <div key={stat.key} className="flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full ${stat.color || 'bg-gray-400'}`}></span>
+                    <span className="font-semibold">{stat.label}: {displayValue}</span>
+                  </div>
+                );
+              })}
             </div>
           )}
             <button

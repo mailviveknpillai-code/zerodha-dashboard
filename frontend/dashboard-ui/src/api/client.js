@@ -19,7 +19,7 @@ const USE_MOCK_DATA = isMockModeEnabled();
 const client = USE_MOCK_DATA ? mockClient : null;
 
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_BACKEND_BASE_URL || 'http://localhost:8080',
+  baseURL: import.meta.env.VITE_BACKEND_BASE_URL || 'http://localhost:9000',
   timeout: 5000,
 });
 
@@ -50,11 +50,11 @@ export async function fetchDerivatives(underlying = 'NIFTY') {
   
   console.debug("fetchDerivatives: underlying", underlying);
   try {
-    // Use only real Breeze API derivatives data (spot price fetched automatically)
+    // Use only real Zerodha API derivatives data (spot price fetched automatically)
     const res = await api.get('/api/real-derivatives', { 
       params: { underlying } 
     });
-    console.info("fetchDerivatives success (real Breeze API data):", underlying);
+    console.info("fetchDerivatives success (real Zerodha API data):", underlying);
     return res.data;
   } catch (error) {
     console.error("fetchDerivatives error for underlying=", underlying, ":", error);
@@ -72,7 +72,7 @@ export async function fetchDerivativesBySegment(segment, underlying = 'NIFTY') {
     const res = await api.get('/api/real-derivatives/segment', { 
       params: { segment, underlying }
     });
-    console.info("fetchDerivativesBySegment success (real Breeze API data):", segment, underlying);
+    console.info("fetchDerivativesBySegment success (real Zerodha API data):", segment, underlying);
     return res.data;
   } catch (error) {
     console.error("fetchDerivativesBySegment error:", error);
@@ -87,11 +87,11 @@ export async function fetchStrikePriceMonitoring(underlying = 'NIFTY') {
   
   console.debug("fetchStrikePriceMonitoring: underlying", underlying);
   try {
-    // Use only real Breeze API strike monitoring data (spot price fetched automatically)
+    // Use only real Zerodha API strike monitoring data (spot price fetched automatically)
     const res = await api.get('/api/real-strike-monitoring', { 
       params: { underlying } 
     });
-    console.info("fetchStrikePriceMonitoring success (real Breeze API data):", underlying);
+    console.info("fetchStrikePriceMonitoring success (real Zerodha API data):", underlying);
     return res.data;
   } catch (error) {
     console.error("fetchStrikePriceMonitoring error:", error);

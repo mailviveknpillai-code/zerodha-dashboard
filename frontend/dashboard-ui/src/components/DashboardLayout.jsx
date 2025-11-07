@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useMemo, memo, useCallback } from 'react';
-import { Link } from 'react-router-dom';
 import TopNavbar from './TopNavbar';
 import FavoritesSidebar from './FavoritesSidebar';
 import MarketSummary from './MarketSummary';
 import DerivativesDashboard from './DerivativesDashboard';
 import CollapsibleRightPanel from './CollapsibleRightPanel';
 import { fetchDerivatives } from '../api/client';
+import { REFRESH_INTERVAL_MS } from '../constants';
 
 const DashboardLayout = memo(function DashboardLayout() {
   const [selected, setSelected] = useState('NIFTY');
@@ -17,7 +17,10 @@ const DashboardLayout = memo(function DashboardLayout() {
   // Removed mockData - using real API data only
   
   // Memoize selectedContract to prevent object recreation
-  const memoizedSelectedContract = useMemo(() => selectedContract, [selectedContract?.tradingsymbol, selectedContract?.expiryDate]);
+  const memoizedSelectedContract = useMemo(
+    () => selectedContract,
+    [selectedContract?.tradingsymbol, selectedContract?.expiryDate, selectedContract?.instrumentToken]
+  );
   
   console.log('🔄 DashboardLayout: Component rendered', {
     selected: selected,
@@ -35,24 +38,42 @@ const DashboardLayout = memo(function DashboardLayout() {
         console.log('🔄 DashboardLayout: Loading derivatives data...');
         const data = await fetchDerivatives('NIFTY');
         
-        if (mounted) {
-          // Set contracts and default selection only on first load
-          if (data && data.futures && contracts.length === 0) {
-            console.log('🔄 DashboardLayout: Setting up contracts...');
-            // Convert expiry dates to Date objects and sort by expiry
-            const futuresWithDates = data.futures.map(future => ({
+        if (mounted && data && Array.isArray(data.futures)) {
+          console.log('🔄 DashboardLayout: Updating contracts list...');
+
+          const futuresWithDates = data.futures
+            .map(future => ({
               ...future,
-              expiryDate: new Date(future.expiryDate)
-            })).sort((a, b) => a.expiryDate - b.expiryDate);
-            
-            setContracts(futuresWithDates);
-            
-            // Set the first contract (earliest expiry - current month) as default
-            if (futuresWithDates.length > 0 && !selectedContract) {
-              console.log('🔄 DashboardLayout: Setting default contract:', futuresWithDates[0].tradingsymbol);
-              setSelectedContract(futuresWithDates[0]);
+              expiryDate: future.expiryDate instanceof Date
+                ? future.expiryDate
+                : new Date(future.expiryDate)
+            }))
+            .sort((a, b) => a.expiryDate - b.expiryDate);
+
+          setContracts(futuresWithDates);
+
+          setSelectedContract(prev => {
+            if (!futuresWithDates.length) {
+              return prev ?? null;
             }
-          }
+
+            if (!prev) {
+              console.log('🔄 DashboardLayout: Setting default contract:', futuresWithDates[0].tradingsymbol);
+              return futuresWithDates[0];
+            }
+
+            const matched = futuresWithDates.find(future => {
+              if (prev.instrumentToken && future.instrumentToken) {
+                return String(future.instrumentToken) === String(prev.instrumentToken);
+              }
+              if (prev.tradingsymbol && future.tradingsymbol) {
+                return future.tradingsymbol === prev.tradingsymbol;
+              }
+              return false;
+            });
+
+            return matched || futuresWithDates[0];
+          });
         }
       } catch (error) {
         console.error('Error loading derivatives data:', error);
@@ -67,7 +88,7 @@ const DashboardLayout = memo(function DashboardLayout() {
       if (mounted) {
         loadDerivatives();
       }
-    }, 2000);
+    }, REFRESH_INTERVAL_MS);
     
     return () => {
       mounted = false;

@@ -17,8 +17,13 @@ export default function TopNavbar({ onToggleRightPanel }) {
           <div className="flex items-center justify-between h-16">
           {/* Left side - Dashboard name */}
           <div className="flex-shrink-0 flex items-center gap-3">
-            <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 dark:from-blue-400 dark:to-purple-400 bg-clip-text text-transparent">
-              DASHBOARD
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+              <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent dark:hidden">
+                DASHBOARD
+              </span>
+              <span className="hidden dark:inline">
+                DASHBOARD
+              </span>
             </h1>
             {isMockMode && (
               <span className="px-3 py-1 text-xs font-semibold bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 rounded-full border border-yellow-300 dark:border-yellow-700">

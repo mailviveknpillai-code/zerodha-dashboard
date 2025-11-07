@@ -21,5 +21,5 @@ RUN mvn -B -f pom.xml clean package -DskipTests
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
 COPY --from=build /app/dashboard/target/*.jar app.jar
-EXPOSE 8080
+EXPOSE 9000
 ENTRYPOINT ["java","-jar","/app/app.jar"]

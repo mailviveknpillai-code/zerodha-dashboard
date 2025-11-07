@@ -16,25 +16,31 @@
 
 ### Router Configuration
 - ✅ UPnP enabled on router
-- ❌ Port forwarding not yet configured (UPnP automation failed)
+- ❌ Port forwarding not configured (ISP blocked)
 
-## 🔧 Blocked by ISP - Requires ISP Support
+## 🔧 Port Forwarding NOT Required - Using Cloud Tunneling
 
-### Router Port Forwarding (ISP ASSISTANCE REQUIRED)
-The router (DZSI H660GM-A) is ISP-managed and blocks all port forwarding configuration attempts:
-- Manual Port Forwarding: ❌ "Cannot set port forwarding common"
-- DMZ Configuration: ❌ "Could not set Demilitarized Zone (DMZ)!"
-- UPnP Automation: ❌ Router does not expose UPnP API
+### Router Port Forwarding (BLOCKED BY ISP - NOT NEEDED)
+The router (DZSI H660GM-A) is ISP-managed and blocks all port forwarding configuration attempts, BUT this is no longer a blocker because:
 
-**Router Address**: http://192.168.1.1
-**Required Settings**:
-- External Port: 8080
-- Internal IP: 192.168.1.8
-- Internal Port: 8080
-- Protocol: TCP
+**✅ SOLUTION: Cloud Tunneling Services** (Recommended)
+Port forwarding is **optional** per documentation. Use cloud tunneling instead:
 
-**Action Required**: Contact ISP to enable port forwarding remotely or enable full admin access.
-**Email Template**: See `ISP_PORT_FORWARDING_REQUEST.txt`
+1. **Cloudflared Tunnel** (Quick Testing) - Already available
+   - Run: `.\scripts\setup-cloudflared-tunnel.ps1`
+   - Get public URL in 2 minutes
+   - No ISP support needed
+
+2. **Cloudflare Tunnel + DuckDNS** (Production)
+   - Permanent domain
+   - Free forever
+   - No port forwarding ever
+
+3. **ngrok** (Alternative)
+   - Free tier available
+   - Paid tier for permanent URLs
+
+**See**: `docs/BREEZE_NO_PORT_FORWARDING_ALTERNATIVES.md` for complete guide
 
 ## 🧪 Testing
 
@@ -52,24 +58,37 @@ curl http://122.167.184.90:8080/api/breeze/status
 
 ## 📝 ICICI Direct Configuration
 
-**Fixed Redirect URI**: http://122.167.184.90:8080/api/breeze/callback
+**Redirect URI Options**:
+- ❌ OLD (Blocked): http://122.167.184.90:8080/api/breeze/callback
+- ✅ NEW (Cloudflared): https://your-url.trycloudflare.com/api/breeze/callback
 
-Note: This URI must be publicly accessible for Breeze API OAuth callback to work. Port forwarding is essential.
+Note: Redirect URI must be publicly accessible for Breeze API OAuth callback. **Port forwarding NOT required** - use cloud tunneling instead.
 
-## 🚀 Alternative Solutions
+## 🚀 Recommended Solution (Works Now!)
 
-If port forwarding cannot be configured:
-1. **Cloudflared Tunnel**: Already running but temporary
-   - URL: https://segment-souls-pure-beaches.trycloudflare.com
-   - Cannot be used with ICICI's fixed redirect URI
+**Use Cloudflared Tunnel** - Already have the exe, just need to run it:
 
-2. **Cloud Hosting**: Deploy on AWS/DigitalOcean/VPS with public IP
+```powershell
+# 1. Make sure backend is running on port 8080
+docker-compose up backend
 
-3. **DDNS Service**: Use dynamic DNS if IP changes
+# 2. In another terminal, start tunnel
+.\scripts\setup-cloudflared-tunnel.ps1
+
+# 3. Update ICICI Direct redirect URI with the URL shown
+# 4. Test OAuth flow
+```
+
+**Full documentation**: See `docs/BREEZE_NO_PORT_FORWARDING_ALTERNATIVES.md`
+
+## Alternative Long-term Solutions
+1. **Cloudflare Tunnel + DuckDNS**: Production-grade, permanent, free
+2. **ngrok Pro**: $10/month, permanent URLs
+3. **VPS/Cloud Hosting**: Deploy to AWS/DigitalOcean/etc
 
 ## Next Steps
-1. Configure router port forwarding manually
-2. Test external access to http://122.167.184.90:8080
-3. Update ICICI Direct with the callback URL if needed
-4. Test Breeze API integration
+1. ✅ Run cloudflared tunnel script
+2. ✅ Update ICICI Direct redirect URI
+3. ✅ Test Breeze API OAuth callback
+4. ✅ For production: Set up Cloudflare Tunnel + DuckDNS
 

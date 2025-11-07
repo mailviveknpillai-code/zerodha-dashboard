@@ -1,16 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import { fetchDerivatives } from '../api/client';
+import { REFRESH_INTERVAL_MS } from '../constants';
 
 export default function MarketSummary({ symbol }) {
   const [spot, setSpot] = useState(null);
   const [lotSize, setLotSize] = useState(null);
   const [expiry, setExpiry] = useState(null);
+  const [volume, setVolume] = useState(null);
 
   useEffect(() => {
     let mounted = true;
     const load = async () => {
       try {
-        // Use Breeze API derivatives data
+        // Use Zerodha API derivatives data
         const derivativesData = await fetchDerivatives(symbol);
         if (mounted && derivativesData) {
           if (derivativesData.spotPrice) {
@@ -25,6 +27,8 @@ export default function MarketSummary({ symbol }) {
               return new Date(current.expiryDate) < new Date(earliest.expiryDate) ? current : earliest;
             });
             setExpiry(new Date(earliestFuture.expiryDate).toLocaleDateString('en-GB'));
+            const parsedVolume = Number(earliestFuture.volume);
+            setVolume(Number.isFinite(parsedVolume) ? parsedVolume : null);
           }
         }
       } catch (error) {
@@ -32,7 +36,7 @@ export default function MarketSummary({ symbol }) {
       }
     };
     load();
-    const id = setInterval(load, 2000);
+    const id = setInterval(load, REFRESH_INTERVAL_MS);
     return () => { mounted = false; clearInterval(id); };
   }, [symbol]);
 
@@ -58,11 +62,15 @@ export default function MarketSummary({ symbol }) {
               <span className="w-2 h-2 bg-orange-500 rounded-full"></span>
               Expiry: <span className="font-semibold text-gray-900">{expiry ?? '—'}</span>
             </span>
+            <span className="flex items-center gap-1">
+              <span className="w-2 h-2 bg-purple-500 rounded-full"></span>
+              Vol: <span className="font-semibold text-gray-900">{volume != null ? volume.toLocaleString() : '—'}</span>
+            </span>
           </div>
         </div>
         <div className="text-right">
           <div className="text-xs text-gray-500 mb-1">Auto Refresh</div>
-          <div className="text-sm font-semibold text-blue-600">2s</div>
+          <div className="text-sm font-semibold text-blue-600">{REFRESH_INTERVAL_MS / 1000}s</div>
         </div>
       </div>
     </div>

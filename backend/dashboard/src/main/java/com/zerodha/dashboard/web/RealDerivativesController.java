@@ -65,15 +65,21 @@ public class RealDerivativesController {
             Optional<DerivativesChain> derivativesChain = Optional.empty();
             String dataSource = "NO_DATA";
             
-            // Use Mock Data if enabled (for UI testing while API is being fixed)
-            if (mockDataEnabled) {
-                log.info("Using mock data for UI testing");
-                derivativesChain = Optional.of(mockDataService.generateMockDerivativesChain());
-                dataSource = "MOCK_DATA";
-                log.info("Successfully generated mock derivatives chain");
+            // Priority: Zerodha Kite API (if enabled) > Breeze API > Mock Data
+            // Mock data is disabled when Zerodha is enabled
+            if (zerodhaEnabled) {
+                log.info("Fetching data from Zerodha Kite API (priority)");
+                derivativesChain = zerodhaApiAdapter.getDerivativesChain(normalizedUnderlying);
+                if (derivativesChain.isPresent()) {
+                    dataSource = "ZERODHA_KITE";
+                    log.info("Successfully fetched derivatives chain using Zerodha Kite API");
+                } else {
+                    log.warn("Zerodha Kite API returned no data for {}", normalizedUnderlying);
+                }
             }
-            // Use Breeze API as primary data source
-            else if (breezeApiEnabled) {
+            
+            // Fallback to Breeze API if Zerodha is disabled or failed
+            if (!derivativesChain.isPresent() && breezeApiEnabled && !zerodhaEnabled) {
                 log.info("Fetching data from Breeze API");
                 derivativesChain = breezeApiAdapter.getDerivativesChain(normalizedUnderlying);
                 if (derivativesChain.isPresent()) {
@@ -84,14 +90,12 @@ public class RealDerivativesController {
                 }
             }
             
-            // Fallback to Zerodha Kite API if enabled and Breeze failed
-            if (!derivativesChain.isPresent() && zerodhaEnabled) {
-                log.info("Attempting to fetch data from Zerodha Kite API");
-                derivativesChain = zerodhaApiAdapter.getDerivativesChain(normalizedUnderlying);
-                if (derivativesChain.isPresent()) {
-                    dataSource = "ZERODHA_KITE";
-                    log.info("Successfully fetched derivatives chain using Zerodha Kite API");
-                }
+            // Mock data ONLY if both APIs are disabled (never when Zerodha is enabled)
+            if (!derivativesChain.isPresent() && mockDataEnabled && !zerodhaEnabled) {
+                log.info("Using mock data for UI testing (Zerodha is disabled)");
+                derivativesChain = Optional.of(mockDataService.generateMockDerivativesChain());
+                dataSource = "MOCK_DATA";
+                log.info("Successfully generated mock derivatives chain");
             }
             
             if (derivativesChain.isPresent()) {

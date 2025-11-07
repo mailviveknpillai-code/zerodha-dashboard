@@ -1,55 +1,43 @@
 import React, { useEffect, useState } from 'react';
 import { fetchStrikePriceMonitoring } from '../api/client';
 import BackButton from './BackButton';
+import { REFRESH_INTERVAL_MS } from '../constants';
 
 export default function StrikePriceMonitoring() {
   const [monitoringData, setMonitoringData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [isInitialLoad, setIsInitialLoad] = useState(true);
 
   useEffect(() => {
     let mounted = true;
-    let intervalId = null;
     
     const loadMonitoringData = async () => {
       try {
         console.log('🚀 StrikePriceMonitoring: Loading strike price monitoring data...');
-        if (isInitialLoad) setLoading(true);
         const data = await fetchStrikePriceMonitoring('NIFTY');
         console.log('✅ StrikePriceMonitoring: Data loaded:', data);
         if (mounted) {
           setMonitoringData(data);
-          if (isInitialLoad) {
-            setIsInitialLoad(false);
-          }
         }
       } catch (error) {
         console.error('❌ StrikePriceMonitoring: Error loading data:', error);
-        if (mounted && isInitialLoad) {
-          setMonitoringData(null);
-        }
       } finally {
-        if (mounted && isInitialLoad) {
+        if (mounted) {
           setLoading(false);
         }
       }
     };
-    
-    // Load data immediately
+
     loadMonitoringData();
-    
-    // Set up interval only after initial load
-    intervalId = setInterval(() => {
+
+    const intervalId = setInterval(() => {
       if (mounted) {
         loadMonitoringData();
       }
-    }, 2000);
-    
+    }, REFRESH_INTERVAL_MS);
+
     return () => {
       mounted = false;
-      if (intervalId) {
-        clearInterval(intervalId);
-      }
+      clearInterval(intervalId);
     };
   }, []); // Empty dependency array to prevent re-mounting
 
