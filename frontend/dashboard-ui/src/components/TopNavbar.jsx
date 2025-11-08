@@ -81,6 +81,12 @@ export default function TopNavbar({ onToggleRightPanel }) {
               </div>
 
               <div className="flex items-center space-x-3">
+                <button
+                  onClick={handleLogoutClick}
+                  className="px-4 py-2 text-sm font-medium text-red-600 hover:text-red-700 border border-red-200 hover:border-red-300 dark:text-red-300 dark:border-red-500/60 dark:hover:border-red-400 rounded-lg transition-all duration-200"
+                >
+                  Logout Zerodha
+                </button>
                 {/* Right Panel Toggle */}
                 <button
                   onClick={handleToggleRightPanel}
@@ -100,13 +106,6 @@ export default function TopNavbar({ onToggleRightPanel }) {
                       d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" 
                     />
                   </svg>
-                </button>
-
-                <button
-                  onClick={handleLogoutClick}
-                  className="px-4 py-2 text-sm font-medium text-red-600 hover:text-red-700 border border-red-200 hover:border-red-300 dark:text-red-300 dark:border-red-500/60 dark:hover:border-red-400 rounded-lg transition-all duration-200"
-                >
-                  Logout Zerodha
                 </button>
               </div>
           </div>

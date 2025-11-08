@@ -220,7 +220,7 @@ export default function OptionsTable({
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden mb-6">
-      <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-4 border-b border-gray-200">
+      <div className="bg-white px-6 py-4 border-b border-gray-200">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h3 className="font-bold text-lg text-gray-900">{title}</h3>
           <div className="flex items-center gap-3">
@@ -239,8 +239,8 @@ export default function OptionsTable({
         </div>
       </div>
       {!collapsed && (hasData ? (
-        <div>
-        <table className="w-full text-sm table-fixed">
+        <div className="overflow-x-auto">
+        <table className="min-w-[720px] w-full text-sm table-fixed">
           <colgroup>
             <col className="w-56" />
             <col className="w-24" />
@@ -270,7 +270,7 @@ export default function OptionsTable({
             <tbody>
               {data.map((row, i) => {
                 const baseKey = row.instrumentToken || `${row.tradingsymbol || row.segment}-${i}`;
-                const numericCellBase = 'py-3 px-4 text-right tabular-nums font-mono data-cell';
+                const numericCellBase = 'py-3 px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell';
                 
                 return (
                 <tr 

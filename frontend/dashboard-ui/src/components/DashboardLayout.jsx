@@ -12,6 +12,7 @@ const DashboardLayout = memo(function DashboardLayout() {
   const [contracts, setContracts] = useState([]);
   const [selectedContract, setSelectedContract] = useState(null);
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
+  const [isLeftPanelOpen, setIsLeftPanelOpen] = useState(true);
   const [blinkEnabled, setBlinkEnabled] = useState(true);
   const [animateEnabled, setAnimateEnabled] = useState(true);
   // Removed mockData - using real API data only
@@ -22,6 +23,11 @@ const DashboardLayout = memo(function DashboardLayout() {
     [selectedContract?.tradingsymbol, selectedContract?.expiryDate, selectedContract?.instrumentToken]
   );
   
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      setIsLeftPanelOpen(false);
+    }
+  }, []);
   console.log('🔄 DashboardLayout: Component rendered', {
     selected: selected,
     selectedContract: selectedContract?.tradingsymbol,
@@ -115,29 +121,37 @@ const DashboardLayout = memo(function DashboardLayout() {
     setIsRightPanelOpen(isOpen);
   }, []);
 
+  const handleToggleLeftPanel = useCallback(() => {
+    setIsLeftPanelOpen(prev => !prev);
+  }, []);
+
   const handleSelect = useCallback((symbol) => {
     setSelected(symbol);
   }, []);
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-white dark:bg-slate-900 flex flex-col">
       <TopNavbar onToggleRightPanel={handleToggleRightPanel} />
-      <div className="flex">
+      <div className="flex-1 relative flex flex-col lg:flex-row">
         <FavoritesSidebar 
           selected={selected} 
           onSelect={handleSelect}
           contracts={contracts}
           selectedContract={selectedContract}
           onContractSelect={handleContractSelect}
+          isOpen={isLeftPanelOpen}
+          onToggle={handleToggleLeftPanel}
         />
-            <main className="flex-1 p-4 space-y-3">
-              <MarketSummary symbol={selected} />
-              <DerivativesDashboard 
-                selectedContract={memoizedSelectedContract}
-                blinkEnabled={blinkEnabled}
-                animateEnabled={animateEnabled}
-              />
-            </main>
+
+        <main className="flex-1 w-full px-3 sm:px-4 lg:px-6 py-4 space-y-4 bg-white">
+          <MarketSummary symbol={selected} />
+          <DerivativesDashboard 
+            selectedContract={memoizedSelectedContract}
+            blinkEnabled={blinkEnabled}
+            animateEnabled={animateEnabled}
+          />
+        </main>
+
         {isRightPanelOpen && (
           <CollapsibleRightPanel 
             blinkEnabled={blinkEnabled}

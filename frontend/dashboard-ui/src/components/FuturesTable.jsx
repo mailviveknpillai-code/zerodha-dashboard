@@ -273,7 +273,7 @@ export default function FuturesTable({ spot, baseSymbol, selectedContract, blink
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-      <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-4 border-b border-gray-200">
+      <div className="bg-white px-6 py-4 border-b border-gray-200">
         <div className="flex justify-between items-center">
           <div>
             <h3 className="font-bold text-lg text-gray-900">
@@ -314,8 +314,8 @@ export default function FuturesTable({ spot, baseSymbol, selectedContract, blink
           </div>
         </div>
       </div>
-      <div>
-      <table className="w-full text-sm table-fixed">
+      <div className="overflow-x-auto">
+      <table className="min-w-[720px] w-full text-sm table-fixed">
         <colgroup>
           <col className="w-56" />
           <col className="w-24" />
@@ -345,7 +345,7 @@ export default function FuturesTable({ spot, baseSymbol, selectedContract, blink
         <tbody>
           {organizedRows.map((row, i) => {
             const baseKey = row.instrumentToken || `${row.tradingsymbol || row.segment}-${i}`;
-            const numericCellBase = 'py-3 px-4 text-right tabular-nums font-mono data-cell';
+            const numericCellBase = 'py-3 px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell';
             
             return (
             <tr 

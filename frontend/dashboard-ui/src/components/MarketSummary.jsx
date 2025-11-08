@@ -52,7 +52,7 @@ export default function MarketSummary({ symbol }) {
             </span>
             <span className="flex items-center gap-1">
               <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-              Spot LTP: <span className="font-semibold text-gray-900">₹{spot ?? '—'}</span>
+              Spot LTP: <span className="font-semibold text-black dark:text-gray-100">₹{spot ?? '—'}</span>
             </span>
             <span className="flex items-center gap-1">
               <span className="w-2 h-2 bg-purple-500 rounded-full"></span>
