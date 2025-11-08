@@ -1,14 +1,44 @@
 import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
-import { isMockMode } from '../api/client';
+import { Link, useNavigate } from 'react-router-dom';
+import { isMockMode, logoutZerodhaSession } from '../api/client';
 
 export default function TopNavbar({ onToggleRightPanel }) {
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [logoutLoading, setLogoutLoading] = useState(false);
+  const [logoutError, setLogoutError] = useState(null);
+  const navigate = useNavigate();
 
   const handleToggleRightPanel = () => {
     const newState = !isRightPanelOpen;
     setIsRightPanelOpen(newState);
     onToggleRightPanel(newState);
+  };
+
+  const handleLogoutClick = () => {
+    setLogoutError(null);
+    setShowLogoutConfirm(true);
+  };
+
+  const closeLogoutModal = () => {
+    if (!logoutLoading) {
+      setShowLogoutConfirm(false);
+    }
+  };
+
+  const confirmLogout = async () => {
+    setLogoutLoading(true);
+    setLogoutError(null);
+    try {
+      await logoutZerodhaSession();
+      setShowLogoutConfirm(false);
+      navigate('/zerodha-login', { replace: true });
+    } catch (error) {
+      console.error('TopNavbar: failed to logout from Zerodha', error);
+      setLogoutError('Failed to log out. Please try again.');
+    } finally {
+      setLogoutLoading(false);
+    }
   };
 
   return (
@@ -50,29 +80,80 @@ export default function TopNavbar({ onToggleRightPanel }) {
               </Link>
               </div>
 
-              {/* Right Panel Toggle */}
-              <button
-              onClick={handleToggleRightPanel}
-              className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-all duration-200 group"
-              title={isRightPanelOpen ? 'Hide right panel' : 'Show right panel'}
-            >
-              <svg 
-                className="w-5 h-5 group-hover:scale-110 transition-transform duration-200" 
-                fill="none" 
-                stroke="currentColor" 
-                viewBox="0 0 24 24"
-              >
-                <path 
-                  strokeLinecap="round" 
-                  strokeLinejoin="round" 
-                  strokeWidth={2} 
-                  d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" 
-                />
-              </svg>
-            </button>
+              <div className="flex items-center space-x-3">
+                {/* Right Panel Toggle */}
+                <button
+                  onClick={handleToggleRightPanel}
+                  className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-all duration-200 group"
+                  title={isRightPanelOpen ? 'Hide right panel' : 'Show right panel'}
+                >
+                  <svg 
+                    className="w-5 h-5 group-hover:scale-110 transition-transform duration-200" 
+                    fill="none" 
+                    stroke="currentColor" 
+                    viewBox="0 0 24 24"
+                  >
+                    <path 
+                      strokeLinecap="round" 
+                      strokeLinejoin="round" 
+                      strokeWidth={2} 
+                      d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" 
+                    />
+                  </svg>
+                </button>
+
+                <button
+                  onClick={handleLogoutClick}
+                  className="px-4 py-2 text-sm font-medium text-red-600 hover:text-red-700 border border-red-200 hover:border-red-300 dark:text-red-300 dark:border-red-500/60 dark:hover:border-red-400 rounded-lg transition-all duration-200"
+                >
+                  Logout Zerodha
+                </button>
+              </div>
           </div>
         </div>
       </div>
+      {showLogoutConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-4">
+          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-gray-200 dark:border-slate-700 max-w-sm w-full p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-red-100 text-red-600">
+                !
+              </span>
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Confirm Logout</h2>
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  Logging out will stop live Zerodha data until you sign in again.
+                </p>
+              </div>
+            </div>
+
+            {logoutError && (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-600 dark:bg-red-900/20 dark:border-red-800 dark:text-red-300">
+                {logoutError}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={closeLogoutModal}
+                disabled={logoutLoading}
+                className="px-4 py-2 rounded-lg border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmLogout}
+                disabled={logoutLoading}
+                className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white font-semibold shadow-sm disabled:opacity-70 disabled:cursor-not-allowed transition-colors"
+              >
+                {logoutLoading ? 'Logging out…' : 'Logout'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </nav>
   );
 }

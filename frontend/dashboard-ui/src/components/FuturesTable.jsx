@@ -315,24 +315,37 @@ export default function FuturesTable({ spot, baseSymbol, selectedContract, blink
         </div>
       </div>
       <div>
-      <table className="w-full text-sm">
-        <thead className="bg-gray-50 text-gray-600 text-xs font-semibold">
+      <table className="w-full text-sm table-fixed">
+        <colgroup>
+          <col className="w-56" />
+          <col className="w-24" />
+          <col className="w-24" />
+          <col className="w-20" />
+          <col className="w-24" />
+          <col className="w-24" />
+          <col className="w-24" />
+          <col className="w-24" />
+          <col className="w-24" />
+          <col className="w-24" />
+        </colgroup>
+        <thead className="bg-gray-50 text-gray-600 text-xs font-semibold uppercase tracking-wide">
           <tr>
             <th className="text-left px-4 py-3">Segment</th>
-            <th className="px-4 py-3">LTP</th>
-            <th className="px-4 py-3">Δ Price</th>
-            <th className="px-4 py-3">%Δ</th>
-            <th className="px-4 py-3">OI</th>
-            <th className="px-4 py-3">Vol</th>
-            <th className="px-4 py-3">Bid</th>
-            <th className="px-4 py-3">Ask</th>
-            <th className="px-4 py-3">Bid Qty</th>
-            <th className="px-4 py-3">Ask Qty</th>
+            <th className="px-4 py-3 text-right">LTP</th>
+            <th className="px-4 py-3 text-right">Δ Price</th>
+            <th className="px-4 py-3 text-right">%Δ</th>
+            <th className="px-4 py-3 text-right">OI</th>
+            <th className="px-4 py-3 text-right">Vol</th>
+            <th className="px-4 py-3 text-right">Bid</th>
+            <th className="px-4 py-3 text-right">Ask</th>
+            <th className="px-4 py-3 text-right">Bid Qty</th>
+            <th className="px-4 py-3 text-right">Ask Qty</th>
           </tr>
         </thead>
         <tbody>
           {organizedRows.map((row, i) => {
             const baseKey = row.instrumentToken || `${row.tradingsymbol || row.segment}-${i}`;
+            const numericCellBase = 'py-3 px-4 text-right tabular-nums font-mono data-cell';
             
             return (
             <tr 
@@ -352,12 +365,12 @@ export default function FuturesTable({ spot, baseSymbol, selectedContract, blink
               }`}>
                 {row.segment}
               </td>
-              <td className={`py-3 px-4 data-cell ${
+              <td className={`${numericCellBase} ${
                 getPriceTrackingClass(row.ltp, startingValuesRef.current.get(`${baseKey}-ltp`), row.isHeader || row.isSubHeader)
               } ${getLTPColor(row.ltp, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
                 {row.ltp}
               </td>
-                <td className={`py-3 px-4 data-cell ${
+                <td className={`${numericCellBase} ${
                   getPriceTrackingClass(row.change ? Number(row.change) : 0, startingValuesRef.current.get(`${baseKey}-change`), row.isHeader || row.isSubHeader)
                 } ${row.isHeader || row.isSubHeader ? 'text-gray-500' :
                   Number(row.change) > 0 ? 'price-up' : 
@@ -367,7 +380,7 @@ export default function FuturesTable({ spot, baseSymbol, selectedContract, blink
                    Number(row.change) < 0 ? 'delta-animate-down' : '') : ''}`}>
                   {row.change}
                 </td>
-                <td className={`py-3 px-4 data-cell ${
+                <td className={`${numericCellBase} ${
                   getPriceTrackingClass(row.changePercent ? Number(row.changePercent) : 0, startingValuesRef.current.get(`${baseKey}-changePercent`), row.isHeader || row.isSubHeader)
                 } ${row.isHeader || row.isSubHeader ? 'text-gray-500' :
                   Number(row.changePercent) > 0 ? 'price-up' : 
@@ -375,32 +388,32 @@ export default function FuturesTable({ spot, baseSymbol, selectedContract, blink
                 }`}>
                   {row.changePercent ? `${row.changePercent}%` : '—'}
                 </td>
-              <td className={`py-3 px-4 data-cell ${
+              <td className={`${numericCellBase} ${
                 getPriceTrackingClass(row.oi ? Number(row.oi.replace(/,/g, '')) : 0, startingValuesRef.current.get(`${baseKey}-oi`), row.isHeader || row.isSubHeader)
               } ${getOIColor(row.oi, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
                 {row.oi}
               </td>
-              <td className={`py-3 px-4 data-cell ${
+              <td className={`${numericCellBase} ${
                 getPriceTrackingClass(row.vol ? Number(row.vol.replace(/,/g, '')) : 0, startingValuesRef.current.get(`${baseKey}-vol`), row.isHeader || row.isSubHeader)
               } ${getVolumeColor(row.vol, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
                 {row.vol}
               </td>
-              <td className={`py-3 px-4 data-cell ${
+              <td className={`${numericCellBase} ${
                 getPriceTrackingClass(row.bid ? Number(row.bid) : 0, startingValuesRef.current.get(`${baseKey}-bid`), row.isHeader || row.isSubHeader)
               } ${getBidColor(row.bid, row.ltp, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
                 {row.bid}
               </td>
-              <td className={`py-3 px-4 data-cell ${
+              <td className={`${numericCellBase} ${
                 getPriceTrackingClass(row.ask ? Number(row.ask) : 0, startingValuesRef.current.get(`${baseKey}-ask`), row.isHeader || row.isSubHeader)
               } ${getAskColor(row.ask, row.ltp, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
                 {row.ask}
               </td>
-              <td className={`py-3 px-4 data-cell ${
+              <td className={`${numericCellBase} ${
                 getPriceTrackingClass(row.bidQty ? Number(row.bidQty) : 0, startingValuesRef.current.get(`${baseKey}-bidQty`), row.isHeader || row.isSubHeader)
               } ${getBidQtyColor(row.bidQty, row.ltp, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
                 {row.bidQty || '-'}
               </td>
-              <td className={`py-3 px-4 data-cell ${
+              <td className={`${numericCellBase} ${
                 getPriceTrackingClass(row.askQty ? Number(row.askQty) : 0, startingValuesRef.current.get(`${baseKey}-askQty`), row.isHeader || row.isSubHeader)
               } ${getAskQtyColor(row.askQty, row.ltp, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
                 {row.askQty || '-'}

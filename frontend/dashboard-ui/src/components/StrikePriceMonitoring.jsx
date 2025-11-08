@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { fetchStrikePriceMonitoring } from '../api/client';
 import BackButton from './BackButton';
 import { REFRESH_INTERVAL_MS } from '../constants';
@@ -6,6 +7,7 @@ import { REFRESH_INTERVAL_MS } from '../constants';
 export default function StrikePriceMonitoring() {
   const [monitoringData, setMonitoringData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
 
   useEffect(() => {
     let mounted = true;
@@ -16,10 +18,16 @@ export default function StrikePriceMonitoring() {
         const data = await fetchStrikePriceMonitoring('NIFTY');
         console.log('✅ StrikePriceMonitoring: Data loaded:', data);
         if (mounted) {
+          setLoginRequired(false);
+          authUrlRequestedRef.current = false;
           setMonitoringData(data);
         }
       } catch (error) {
         console.error('❌ StrikePriceMonitoring: Error loading data:', error);
+        if (mounted && error?.response?.status === 401) {
+          navigate('/zerodha-login', { replace: true });
+          return;
+        }
       } finally {
         if (mounted) {
           setLoading(false);
@@ -39,7 +47,7 @@ export default function StrikePriceMonitoring() {
       mounted = false;
       clearInterval(intervalId);
     };
-  }, []); // Empty dependency array to prevent re-mounting
+  }, [navigate]); // Dependency on navigate for proper redirects
 
   const getIndicatorIcon = (change, isBlinking) => {
     if (change === undefined || change === null) return '●';

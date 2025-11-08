@@ -1,4 +1,5 @@
 import React, { useMemo, useEffect, useState, memo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { fetchDerivatives } from '../api/client';
 import FuturesTable from './FuturesTable';
 import OptionsTable from './OptionsTable';
@@ -15,6 +16,7 @@ function DerivativesDashboard({
   const [plusStrikeCollapsed, setPlusStrikeCollapsed] = useState(false);
   const [dynamicStrikeIndex, setDynamicStrikeIndex] = useState(null);
   const [dynamicTableCollapsed, setDynamicTableCollapsed] = useState(false);
+  const navigate = useNavigate();
 
   const formatStrikeValue = (value) => {
     if (value === null || value === undefined || value === '') return '-';
@@ -57,6 +59,11 @@ function DerivativesDashboard({
         }
       } catch (error) {
         console.error('❌ DerivativesDashboard: Error loading data:', error);
+        if (mounted && error?.response?.status === 401) {
+          navigate('/zerodha-login', { replace: true });
+          return;
+        }
+
         if (mounted && !derivativesData) {
           // Set empty data structure on error (no hardcoded values)
           setDerivativesData({
@@ -93,7 +100,7 @@ function DerivativesDashboard({
         clearInterval(intervalId);
       }
     };
-  }, []); // Empty dependency array to prevent re-mounting
+  }, [navigate]); // Dependency on navigate ensures navigation works correctly
 
   const organizedData = useMemo(() => {
     if (!derivativesData) {
@@ -194,7 +201,7 @@ function DerivativesDashboard({
       ? (derivativesData.putOptions || []).filter(put => put.expiryDate === targetExpiry)
       : (derivativesData.putOptions || []);
 
-    const referencePrice = futuresPrice || spotPrice || derivativesData.dailyStrikePrice || 0;
+    const referencePrice = spotPrice || derivativesData.dailyStrikePrice || futuresPrice || 0;
 
     // Calculate strikes once for all tables (before defining organizeOptions)
     const strikeUnit = 50;
@@ -202,6 +209,10 @@ function DerivativesDashboard({
       ...calls.map(c => c.strikePrice),
       ...puts.map(p => p.strikePrice)
     ])].sort((a, b) => a - b);
+
+    const strikeStep = allStrikes.length > 1
+      ? Math.abs(Number(allStrikes[1]) - Number(allStrikes[0])) || strikeUnit
+      : strikeUnit;
     
     let currentStrike = allStrikes[0] || 0;
     if (allStrikes.length > 0 && referencePrice) {
@@ -221,61 +232,70 @@ function DerivativesDashboard({
     const sortedCalls = [...calls].sort((a, b) => a.strikePrice - b.strikePrice);
     const sortedPuts = [...puts].sort((a, b) => a.strikePrice - b.strikePrice);
 
-    const findNearestIndex = (options, strike) => {
-      if (!options.length) return -1;
-      let idx = options.findIndex(opt => Number(opt.strikePrice) === Number(strike));
-      if (idx !== -1) return idx;
-      let bestIdx = 0;
-      let bestDiff = Math.abs(options[0].strikePrice - strike);
-      for (let i = 1; i < options.length; i += 1) {
-        const diff = Math.abs(options[i].strikePrice - strike);
-        if (diff < bestDiff) {
-          bestDiff = diff;
-          bestIdx = i;
-        }
+    const formatPrice = (value) => {
+      if (value === null || value === undefined || value === '') return '-';
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric.toFixed(2) : String(value);
+    };
+
+    const formatInteger = (value) => {
+      if (value === null || value === undefined || value === '') return '-';
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? Math.round(numeric).toLocaleString() : String(value);
+    };
+
+    const selectOption = (options, strikeValue, type, direction = 'closest') => {
+      if (!options.length || strikeValue == null) return null;
+      const filtered = options
+        .filter(opt => (opt.instrumentType || '').toUpperCase() === type && opt.strikePrice != null)
+        .sort((a, b) => Number(a.strikePrice) - Number(b.strikePrice));
+
+      if (!filtered.length) return null;
+
+      const target = Number(strikeValue);
+      const exact = filtered.find(opt => Number(opt.strikePrice) === target);
+      if (exact) return exact;
+
+      if (direction === 'below') {
+        const below = filtered.filter(opt => Number(opt.strikePrice) < target);
+        return below.length ? below[below.length - 1] : filtered[0];
       }
-      return bestIdx;
+
+      if (direction === 'above') {
+        const above = filtered.filter(opt => Number(opt.strikePrice) > target);
+        return above.length ? above[0] : filtered[filtered.length - 1];
+      }
+
+      return filtered.reduce((closest, current) => {
+        if (!closest) return current;
+        const currentDiff = Math.abs(Number(current.strikePrice) - target);
+        const closestDiff = Math.abs(Number(closest.strikePrice) - target);
+        if (currentDiff < closestDiff) return current;
+        if (currentDiff === closestDiff) {
+          const currentVol = Number(current.volume) || 0;
+          const closestVol = Number(closest.volume) || 0;
+          return currentVol >= closestVol ? current : closest;
+        }
+        return closest;
+      }, null);
     };
-
-    const getWindowAroundStrike = (options, strike, windowSize = 50) => {
-      if (!options.length) return [];
-      const idx = findNearestIndex(options, strike);
-      if (idx === -1 || idx === undefined) return [];
-      const start = Math.max(idx - windowSize, 0);
-      const end = Math.min(idx + windowSize, options.length - 1);
-      return options.slice(start, end + 1);
-    };
-
-    const windowSize = 100;
-    const callsWindow = getWindowAroundStrike(sortedCalls, currentStrike, windowSize);
-    const putsWindow = getWindowAroundStrike(sortedPuts, currentStrike, windowSize);
-    const strikeStep = allStrikes.length > 1 ? Math.abs(allStrikes[1] - allStrikes[0]) : strikeUnit;
-
-    const callsMinusStrike = sortedCalls.filter(opt => Number(opt.strikePrice) === Number(minusOneStrike));
-    const putsMinusStrike = sortedPuts.filter(opt => Number(opt.strikePrice) === Number(minusOneStrike));
-    const callsPlusStrike = sortedCalls.filter(opt => Number(opt.strikePrice) === Number(plusOneStrike));
-    const putsPlusStrike = sortedPuts.filter(opt => Number(opt.strikePrice) === Number(plusOneStrike));
 
     const buildOptionRow = (option, labelPrefix, sectionType) => {
-      const changeValue = option?.change != null ? Number(option.change) : 0;
+      const changeValue = option?.change != null ? Number(option.change) : null;
       const indicator = changeValue > 0 ? 'up' : changeValue < 0 ? 'down' : 'neutral';
-      const bidValue = option?.bid != null ? Number(option.bid).toFixed(2) : '-';
-      const askValue = option?.ask != null ? Number(option.ask).toFixed(2) : '-';
-      const bidQtyValue = option?.bidQuantity != null ? Number(option.bidQuantity).toLocaleString() : '-';
-      const askQtyValue = option?.askQuantity != null ? Number(option.askQuantity).toLocaleString() : '-';
       return {
         segment: option
           ? `${labelPrefix} ${option.strikePrice != null ? Number(option.strikePrice).toFixed(0) : '-'} (${option.tradingsymbol || ''})`
           : `${labelPrefix} -`,
-        ltp: option?.lastPrice != null ? Number(option.lastPrice).toFixed(2) : '-',
-        change: option?.change != null ? changeValue.toFixed(2) : '-',
-        changePercent: option?.changePercent != null ? Number(option.changePercent).toFixed(2) : '-',
-        oi: option?.openInterest != null ? Number(option.openInterest).toLocaleString() : '-',
-        vol: option?.volume != null ? Number(option.volume).toLocaleString() : '-',
-        bid: bidValue,
-        ask: askValue,
-        bidQty: bidQtyValue,
-        askQty: askQtyValue,
+        ltp: option?.lastPrice != null ? formatPrice(option.lastPrice) : '-',
+        change: option?.change != null ? formatPrice(option.change) : '-',
+        changePercent: option?.changePercent != null ? formatPrice(option.changePercent) : '-',
+        oi: option?.openInterest != null ? formatInteger(option.openInterest) : '-',
+        vol: option?.volume != null ? formatInteger(option.volume) : '-',
+        bid: option?.bid != null ? formatPrice(option.bid) : '-',
+        ask: option?.ask != null ? formatPrice(option.ask) : '-',
+        bidQty: option?.bidQuantity != null ? formatInteger(option.bidQuantity) : '-',
+        askQty: option?.askQuantity != null ? formatInteger(option.askQuantity) : '-',
         indicator,
         isBlinking: false,
         strikePrice: option?.strikePrice,
@@ -300,31 +320,8 @@ function DerivativesDashboard({
       sectionType
     });
 
-    const findClosestOption = (options, type, strikeValue) => {
-      const candidates = options.filter(opt => (opt.instrumentType || '').toUpperCase() === type && opt.strikePrice != null);
-      if (!candidates.length) return null;
-      return candidates.reduce((closest, current) => {
-        if (!closest) return current;
-        const currentDiff = Math.abs(Number(current.strikePrice) - strikeValue);
-        const closestDiff = Math.abs(Number(closest.strikePrice) - strikeValue);
-        if (currentDiff < closestDiff) return current;
-        if (currentDiff === closestDiff) {
-          const currentVol = current.volume ? Number(current.volume) : 0;
-          const closestVol = closest.volume ? Number(closest.volume) : 0;
-          return currentVol >= closestVol ? current : closest;
-        }
-        return closest;
-      }, null);
-    };
-
-    // Professional options chain organizer for traders
-    const organizeOptions = (calls, puts, strikeRange, futuresContract, currentStrikeValue, plusOneValue, minusOneValue) => {
-      const rows = [];
-      
-      if (strikeRange === 'main') {
-        if (futuresContract) {
-          rows.push({
-            segment: 'FUTURES',
+    const buildHeaderRow = (label, sectionType) => ({
+      segment: label,
             ltp: '-',
             change: '-',
             changePercent: '-',
@@ -336,157 +333,94 @@ function DerivativesDashboard({
             askQty: '-',
             indicator: 'header',
             isHeader: true,
-            sectionType: 'futures'
-          });
+      sectionType
+    });
 
-          const selectedFutures = futuresContract ? [futuresContract] : [];
-
-          selectedFutures.forEach(future => {
-            const change = future.change ? Number(future.change) : 0;
-            const isBelowStrike = derivativesData.dailyStrikePrice && Number(future.lastPrice) < Number(derivativesData.dailyStrikePrice);
-            rows.push({
-              segment: future.tradingsymbol,
-              ltp: future.lastPrice ? Number(future.lastPrice).toFixed(2) : '-',
-              change: change.toFixed(2),
-              changePercent: future.changePercent ? Number(future.changePercent).toFixed(2) : '-',
-              oi: future.openInterest ? Number(future.openInterest).toLocaleString() : '-',
-              vol: future.volume ? Number(future.volume).toLocaleString() : '-',
-              bid: future.bid != null ? Number(future.bid).toFixed(2) : '-',
-              ask: future.ask != null ? Number(future.ask).toFixed(2) : '-',
-              bidQty: future.bidQuantity != null ? Number(future.bidQuantity).toLocaleString() : '-',
-              askQty: future.askQuantity != null ? Number(future.askQuantity).toLocaleString() : '-',
-              indicator: change > 0 ? 'up' : change < 0 ? 'down' : 'neutral',
+    const buildFuturesRow = (future) => {
+      if (!future) return null;
+      const changeNumeric = future.change != null ? Number(future.change) : null;
+        const indicator = changeNumeric > 0 ? 'up' : changeNumeric < 0 ? 'down' : 'neutral';
+        const spotReference = derivativesData.spotPrice ?? derivativesData.dailyStrikePrice;
+        const isBelowStrike = spotReference != null && spotReference !== '-' && future.lastPrice != null
+          ? Number(future.lastPrice) < Number(spotReference)
+          : false;
+      return {
+        segment: future.tradingsymbol || 'NIFTY FUT',
+        ltp: future.lastPrice != null ? formatPrice(future.lastPrice) : '-',
+        change: future.change != null ? formatPrice(future.change) : '-',
+        changePercent: future.changePercent != null ? formatPrice(future.changePercent) : '-',
+        oi: future.openInterest != null ? formatInteger(future.openInterest) : '-',
+        vol: future.volume != null ? formatInteger(future.volume) : '-',
+        bid: future.bid != null ? formatPrice(future.bid) : '-',
+        ask: future.ask != null ? formatPrice(future.ask) : '-',
+        bidQty: future.bidQuantity != null ? formatInteger(future.bidQuantity) : '-',
+        askQty: future.askQuantity != null ? formatInteger(future.askQuantity) : '-',
+        indicator,
               isBlinking: isBelowStrike,
               strikePrice: future.strikePrice,
               sectionType: 'futures',
               instrumentToken: future.instrumentToken,
               tradingsymbol: future.tradingsymbol
-            });
-          });
-        }
-        
-        const closestCall = findClosestOption(calls, 'CE', currentStrikeValue);
-        if (closestCall) {
-          rows.push(buildOptionRow(closestCall, 'CALL @', 'calls'));
-        } else {
-          rows.push(buildInfoRow('CALL @ -', 'calls'));
-        }
-
-        const closestPut = findClosestOption(puts, 'PE', currentStrikeValue);
-        if (closestPut) {
-          rows.push(buildOptionRow(closestPut, 'PUT @', 'puts'));
-        } else {
-          rows.push(buildInfoRow('PUT @ -', 'puts'));
-        }
-
-        return rows;
-      }
-
-      if (strikeRange === 'minusOne') {
-        const minusLabel = (typeof minusOneValue === 'number' && !isNaN(minusOneValue)) ? minusOneValue : 'N/A';
-        rows.push({ 
-          segment: `CALL OPTIONS (Strike: ${minusLabel})`,
-          ltp: '-', 
-          change: '-', 
-          oi: '-', 
-          vol: '-', 
-          bid: '-', 
-          ask: '-',
-          bidQty: '-',
-          askQty: '-',
-          indicator: 'header',
-          isHeader: true,
-          sectionType: 'calls'
-        });
-        
-        const minusCalls = calls.filter(call => (call.instrumentType || '').toUpperCase() === 'CE');
-        if (minusCalls.length) {
-          minusCalls.forEach(call => rows.push(buildOptionRow(call, call.tradingsymbol || 'CALL', 'calls')));
-        } else {
-          rows.push(buildInfoRow('    No call options available at this strike', 'calls'));
-        }
-        
-        rows.push({ 
-          segment: `PUT OPTIONS (Strike: ${minusLabel})`,
-          ltp: '-', 
-          change: '-', 
-          oi: '-', 
-          vol: '-', 
-          bid: '-', 
-          ask: '-',
-          bidQty: '-',
-          askQty: '-',
-          indicator: 'header',
-          isHeader: true,
-          sectionType: 'puts'
-        });
-        
-        const minusPuts = puts.filter(put => (put.instrumentType || '').toUpperCase() === 'PE');
-        if (minusPuts.length) {
-          minusPuts.forEach(put => rows.push(buildOptionRow(put, put.tradingsymbol || 'PUT', 'puts')));
-        } else {
-          rows.push(buildInfoRow('    No put options available at this strike', 'puts'));
-        }
-
-        return rows;
-      }
-
-      if (strikeRange === 'plusOne') {
-        const plusLabel = (typeof plusOneValue === 'number' && !isNaN(plusOneValue)) ? plusOneValue : 'N/A';
-        rows.push({ 
-          segment: `CALL OPTIONS (Strike: ${plusLabel})`,
-          ltp: '-', 
-          change: '-', 
-          oi: '-', 
-          vol: '-', 
-          bid: '-', 
-          ask: '-',
-          bidQty: '-',
-          askQty: '-',
-          indicator: 'header',
-          isHeader: true,
-          sectionType: 'calls'
-        });
-        
-        const plusCalls = calls.filter(call => (call.instrumentType || '').toUpperCase() === 'CE');
-        if (plusCalls.length) {
-          plusCalls.forEach(call => rows.push(buildOptionRow(call, call.tradingsymbol || 'CALL', 'calls')));
-        } else {
-          rows.push(buildInfoRow('    No call options available at this strike', 'calls'));
-        }
-        
-        rows.push({ 
-          segment: `PUT OPTIONS (Strike: ${plusLabel})`,
-          ltp: '-', 
-          change: '-', 
-          oi: '-', 
-          vol: '-', 
-          bid: '-', 
-          ask: '-',
-          bidQty: '-',
-          askQty: '-',
-          indicator: 'header',
-          isHeader: true,
-          sectionType: 'puts'
-        });
-        
-        const plusPuts = puts.filter(put => (put.instrumentType || '').toUpperCase() === 'PE');
-        if (plusPuts.length) {
-          plusPuts.forEach(put => rows.push(buildOptionRow(put, put.tradingsymbol || 'PUT', 'puts')));
-        } else {
-          rows.push(buildInfoRow('    No put options available at this strike', 'puts'));
-        }
-
-        return rows;
-      }
-      
-      return rows;
+      };
     };
 
+    const atmCall = selectOption(sortedCalls, currentStrike, 'CE', 'closest');
+    const atmPut = selectOption(sortedPuts, currentStrike, 'PE', 'closest');
+    const belowCall = selectOption(sortedCalls, minusOneStrike, 'CE', 'below');
+    const belowPut = selectOption(sortedPuts, minusOneStrike, 'PE', 'below');
+    const aboveCall = selectOption(sortedCalls, plusOneStrike, 'CE', 'above');
+    const abovePut = selectOption(sortedPuts, plusOneStrike, 'PE', 'above');
+    const futuresRow = buildFuturesRow(activeFuturesContract);
+
+    const mainRows = [];
+    if (futuresRow) {
+      mainRows.push(futuresRow);
+    }
+    if (atmCall) {
+      mainRows.push(buildOptionRow(atmCall, 'CALL @', 'calls'));
+        } else {
+      mainRows.push(buildInfoRow('CALL @ -', 'calls'));
+    }
+    if (atmPut) {
+      mainRows.push(buildOptionRow(atmPut, 'PUT @', 'puts'));
+        } else {
+      mainRows.push(buildInfoRow('PUT @ -', 'puts'));
+    }
+
+    const belowRows = [];
+    const belowLabel = minusOneStrike != null ? formatStrikeValue(minusOneStrike) : 'N/A';
+    belowRows.push(buildHeaderRow(`CALL OPTIONS (Strike: ${belowLabel})`, 'calls'));
+    if (belowCall) {
+      belowRows.push(buildOptionRow(belowCall, 'CALL', 'calls'));
+        } else {
+      belowRows.push(buildInfoRow('    No call options available at this strike', 'calls'));
+    }
+    belowRows.push(buildHeaderRow(`PUT OPTIONS (Strike: ${belowLabel})`, 'puts'));
+    if (belowPut) {
+      belowRows.push(buildOptionRow(belowPut, 'PUT', 'puts'));
+        } else {
+      belowRows.push(buildInfoRow('    No put options available at this strike', 'puts'));
+    }
+
+    const aboveRows = [];
+    const aboveLabel = plusOneStrike != null ? formatStrikeValue(plusOneStrike) : 'N/A';
+    aboveRows.push(buildHeaderRow(`CALL OPTIONS (Strike: ${aboveLabel})`, 'calls'));
+    if (aboveCall) {
+      aboveRows.push(buildOptionRow(aboveCall, 'CALL', 'calls'));
+        } else {
+      aboveRows.push(buildInfoRow('    No call options available at this strike', 'calls'));
+    }
+    aboveRows.push(buildHeaderRow(`PUT OPTIONS (Strike: ${aboveLabel})`, 'puts'));
+    if (abovePut) {
+      aboveRows.push(buildOptionRow(abovePut, 'PUT', 'puts'));
+    } else {
+      aboveRows.push(buildInfoRow('    No put options available at this strike', 'puts'));
+    }
+
     return {
-      mainTable: organizeOptions(callsWindow, putsWindow, 'main', activeFuturesContract, currentStrike, plusOneStrike, minusOneStrike),
-      minusOneTable: organizeOptions(callsMinusStrike, putsMinusStrike, 'minusOne', null, currentStrike, plusOneStrike, minusOneStrike),
-      plusOneTable: organizeOptions(callsPlusStrike, putsPlusStrike, 'plusOne', null, currentStrike, plusOneStrike, minusOneStrike),
+      mainTable: mainRows,
+      minusOneTable: belowRows,
+      plusOneTable: aboveRows,
       referencePrice,
       currentStrike,
       plusOneStrike,
@@ -520,18 +454,27 @@ function DerivativesDashboard({
   } = organizedData;
  
   const headerStats = useMemo(() => {
-    if (derivativesData?.spotPrice == null) {
-      return [];
-    }
-
-    return [{
+    const stats = [];
+    if (derivativesData?.spotPrice != null) {
+      stats.push({
       key: 'spot',
       label: 'Spot LTP',
       value: Number(derivativesData.spotPrice),
       format: (v) => `₹${Number(v).toLocaleString()}`,
       color: 'bg-green-500'
-    }];
-  }, [derivativesData?.spotPrice]);
+      });
+    }
+    if (activeFuturesContract?.volume != null) {
+      stats.push({
+        key: 'futuresVol',
+        label: 'Vol',
+        value: Number(activeFuturesContract.volume),
+        format: (v) => Number(v).toLocaleString(),
+        color: 'bg-blue-500'
+      });
+    }
+    return stats;
+  }, [derivativesData?.spotPrice, activeFuturesContract?.volume]);
 
   useEffect(() => {
     if (!strikeList || strikeList.length === 0) {

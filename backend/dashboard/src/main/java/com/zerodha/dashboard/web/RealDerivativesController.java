@@ -4,9 +4,11 @@ import com.zerodha.dashboard.adapter.BreezeApiAdapter;
 import com.zerodha.dashboard.adapter.ZerodhaApiAdapter;
 import com.zerodha.dashboard.model.DerivativesChain;
 import com.zerodha.dashboard.service.MockDataService;
+import com.zerodha.dashboard.service.ZerodhaSessionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
@@ -29,6 +31,7 @@ public class RealDerivativesController {
     private final BreezeApiAdapter breezeApiAdapter;
     private final ZerodhaApiAdapter zerodhaApiAdapter;
     private final MockDataService mockDataService;
+    private final ZerodhaSessionService zerodhaSessionService;
     
     @Value("${breeze.api.enabled:true}")
     private boolean breezeApiEnabled;
@@ -39,10 +42,14 @@ public class RealDerivativesController {
     @Value("${mock.data.enabled:false}")
     private boolean mockDataEnabled;
 
-    public RealDerivativesController(BreezeApiAdapter breezeApiAdapter, ZerodhaApiAdapter zerodhaApiAdapter, MockDataService mockDataService) {
+    public RealDerivativesController(BreezeApiAdapter breezeApiAdapter,
+                                     ZerodhaApiAdapter zerodhaApiAdapter,
+                                     MockDataService mockDataService,
+                                     ZerodhaSessionService zerodhaSessionService) {
         this.breezeApiAdapter = breezeApiAdapter;
         this.zerodhaApiAdapter = zerodhaApiAdapter;
         this.mockDataService = mockDataService;
+        this.zerodhaSessionService = zerodhaSessionService;
     }
 
     /**
@@ -68,6 +75,17 @@ public class RealDerivativesController {
             // Priority: Zerodha Kite API (if enabled) > Breeze API > Mock Data
             // Mock data is disabled when Zerodha is enabled
             if (zerodhaEnabled) {
+                if (!zerodhaSessionService.hasActiveAccessToken()) {
+                    log.warn("Zerodha session is not active. Prompting user to login.");
+                    Map<String, Object> loginRequired = new HashMap<>();
+                    loginRequired.put("error", "ZERODHA_LOGIN_REQUIRED");
+                    loginRequired.put("message", "Zerodha session expired or not initialized. Please log in to Zerodha to continue.");
+                    loginRequired.put("auth_url_endpoint", "/api/zerodha/auth-url");
+                    loginRequired.put("dataSource", "ZERODHA_LOGIN_REQUIRED");
+                    loginRequired.put("timestamp", Instant.now());
+                    return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(loginRequired);
+                }
+
                 log.info("Fetching data from Zerodha Kite API (priority)");
                 derivativesChain = zerodhaApiAdapter.getDerivativesChain(normalizedUnderlying);
                 if (derivativesChain.isPresent()) {

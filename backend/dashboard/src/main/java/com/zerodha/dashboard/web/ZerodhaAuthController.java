@@ -2,9 +2,11 @@ package com.zerodha.dashboard.web;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.zerodha.dashboard.service.ZerodhaSessionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -16,6 +18,7 @@ import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -40,7 +43,12 @@ public class ZerodhaAuthController {
     @Value("${zerodha.redirect.uri:}")
     private String redirectUri;
     
+    private final ZerodhaSessionService zerodhaSessionService;
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    public ZerodhaAuthController(ZerodhaSessionService zerodhaSessionService) {
+        this.zerodhaSessionService = zerodhaSessionService;
+    }
     
     /**
      * OAuth callback endpoint for Zerodha Kite API
@@ -98,12 +106,31 @@ public class ZerodhaAuthController {
             
             if (tokenExchangeResult.get("success").equals(true)) {
                 String accessToken = (String) tokenExchangeResult.get("access_token");
+                Map<String, String> sessionPayload = new HashMap<>();
+                sessionPayload.put("access_token", accessToken);
+                if (tokenExchangeResult.containsKey("public_token")) {
+                    sessionPayload.put("public_token", String.valueOf(tokenExchangeResult.get("public_token")));
+                }
+                if (tokenExchangeResult.containsKey("user_id")) {
+                    sessionPayload.put("user_id", String.valueOf(tokenExchangeResult.get("user_id")));
+                }
+                if (tokenExchangeResult.containsKey("user_name")) {
+                    sessionPayload.put("user_name", String.valueOf(tokenExchangeResult.get("user_name")));
+                }
+                if (tokenExchangeResult.containsKey("login_time")) {
+                    sessionPayload.put("login_time", String.valueOf(tokenExchangeResult.get("login_time")));
+                } else {
+                    sessionPayload.put("login_time", Instant.now().toString());
+                }
+
+                zerodhaSessionService.saveSession(sessionPayload);
                 log.info("Successfully exchanged request token for access token");
                 
                 return ResponseEntity.ok(Map.of(
                         "success", true,
                         "message", "OAuth authentication successful",
                         "access_token", accessToken,
+                        "session_cached", true,
                         "action", action != null ? action : "none",
                         "status", status != null ? status : "success",
                         "redirect_url", "/dashboard?success=oauth_success&access_token=" + accessToken
@@ -122,7 +149,7 @@ public class ZerodhaAuthController {
             
         } catch (Exception e) {
             log.error("Error processing Zerodha Kite OAuth callback: {}", e.getMessage(), e);
-            return ResponseEntity.internalServerError()
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of(
                             "success", false,
                             "message", "Error processing OAuth callback",
@@ -207,6 +234,12 @@ public class ZerodhaAuthController {
                     String accessToken = jsonResponse.get("data").get("access_token").asText();
                     result.put("success", true);
                     result.put("access_token", accessToken);
+                    if (jsonResponse.get("data").has("public_token")) {
+                        result.put("public_token", jsonResponse.get("data").get("public_token").asText());
+                    }
+                    if (jsonResponse.get("data").has("login_time")) {
+                        result.put("login_time", jsonResponse.get("data").get("login_time").asText());
+                    }
                     
                     // Also store user info if available
                     if (jsonResponse.get("data").has("user_id")) {
@@ -309,7 +342,45 @@ public class ZerodhaAuthController {
         status.put("auth_url_endpoint", "/api/zerodha/auth-url");
         status.put("status_endpoint", "/api/zerodha/status");
         status.put("message", zerodhaEnabled ? "Zerodha Kite API authentication endpoints are ready" : "Zerodha Kite API is disabled");
+        status.put("session_active", zerodhaSessionService.hasActiveAccessToken());
+
+        Map<String, String> snapshot = zerodhaSessionService.getSessionSnapshot();
+        if (!snapshot.isEmpty()) {
+            status.put("session_last_updated", snapshot.getOrDefault("updated_at", null));
+            status.put("session_user_id", snapshot.getOrDefault("user_id", null));
+        }
         
         return ResponseEntity.ok(status);
+    }
+
+    /**
+     * Expose sanitized session information (without access token) for diagnostics.
+     */
+    @GetMapping("/session")
+    public ResponseEntity<Map<String, Object>> getSession() {
+        Map<String, Object> response = new HashMap<>();
+        Map<String, String> snapshot = zerodhaSessionService.getSessionSnapshot();
+
+        response.put("active", zerodhaSessionService.hasActiveAccessToken());
+        if (!snapshot.isEmpty()) {
+            response.put("user_id", snapshot.getOrDefault("user_id", null));
+            response.put("user_name", snapshot.getOrDefault("user_name", null));
+            response.put("public_token_present", snapshot.containsKey("public_token"));
+            response.put("last_updated", snapshot.getOrDefault("updated_at", null));
+        }
+
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Logout endpoint to clear cached Zerodha session data.
+     */
+    @PostMapping("/logout")
+    public ResponseEntity<Map<String, Object>> logout() {
+        zerodhaSessionService.clearSession();
+        return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "Zerodha session cleared"
+        ));
     }
 }

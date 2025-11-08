@@ -5,10 +5,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zerodha.dashboard.model.DerivativeContract;
 import com.zerodha.dashboard.model.DerivativesChain;
 import com.zerodha.dashboard.model.TickSnapshot;
+import com.zerodha.dashboard.service.ZerodhaSessionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -40,9 +42,12 @@ public class ZerodhaApiAdapter {
     
     @Value("${zerodha.apikey:}")
     private String apiKey;
-    
-    @Value("${zerodha.access.token:}")
-    private String accessToken;
+
+    private final ZerodhaSessionService zerodhaSessionService;
+
+    public ZerodhaApiAdapter(ZerodhaSessionService zerodhaSessionService) {
+        this.zerodhaSessionService = zerodhaSessionService;
+    }
     
     // Zerodha Kite API endpoints
     private static final String KITE_BASE_URL = "https://api.kite.trade";
@@ -58,15 +63,21 @@ public class ZerodhaApiAdapter {
      * Get spot price for underlying from Zerodha Kite API
      */
     public Optional<BigDecimal> getSpotPrice(String underlying) {
-        if (!zerodhaEnabled || apiKey.isEmpty() || accessToken.isEmpty()) {
-            log.warn("Zerodha API is disabled or credentials not provided, cannot fetch spot price");
+        if (!zerodhaEnabled || apiKey.isEmpty()) {
+            log.warn("Zerodha API is disabled or API key missing, cannot fetch spot price");
+            return Optional.empty();
+        }
+
+        Optional<String> accessTokenOpt = zerodhaSessionService.getAccessToken();
+        if (!accessTokenOpt.isPresent()) {
+            log.warn("No Zerodha access token available. User login required.");
             return Optional.empty();
         }
         
         try {
             log.info("Fetching spot price from Zerodha Kite API for underlying: {}", underlying);
             
-            String response = makeZerodhaApiCall(QUOTES_URL, createSpotPricePayload(underlying));
+            String response = makeZerodhaApiCall(accessTokenOpt.get(), QUOTES_URL, createSpotPricePayload(underlying));
             if (response != null && !response.isEmpty()) {
                 return parseSpotPrice(response, underlying);
             }
@@ -96,10 +107,18 @@ public class ZerodhaApiAdapter {
      * Get derivatives chain using Zerodha Kite API with provided spot price
      */
     public Optional<DerivativesChain> getDerivativesChain(String underlying, BigDecimal spotPrice) {
-        if (!zerodhaEnabled || apiKey.isEmpty() || accessToken.isEmpty()) {
-            log.warn("Zerodha API is disabled or credentials not provided, returning empty chain");
+        if (!zerodhaEnabled || apiKey.isEmpty()) {
+            log.warn("Zerodha API is disabled or API key missing, returning empty chain");
             return Optional.empty();
         }
+
+        Optional<String> accessTokenOpt = zerodhaSessionService.getAccessToken();
+        if (!accessTokenOpt.isPresent()) {
+            log.warn("No Zerodha access token available while fetching derivatives chain");
+            return Optional.empty();
+        }
+
+        String accessToken = accessTokenOpt.get();
         
         try {
             log.info("Fetching derivatives data from Zerodha Kite API for underlying: {} with spot price: {}", 
@@ -111,7 +130,7 @@ public class ZerodhaApiAdapter {
             chain.setDataSource("ZERODHA_KITE");
             
             // Fetch futures data first to establish a reference price
-            boolean futuresSuccess = fetchFuturesData(chain, underlying);
+            boolean futuresSuccess = fetchFuturesData(chain, underlying, accessToken);
             if (!futuresSuccess) {
                 log.warn("Failed to fetch futures from Zerodha Kite API");
             }
@@ -129,7 +148,7 @@ public class ZerodhaApiAdapter {
             }
 
             // Fetch option chain data using the reference price to focus on relevant strikes
-            boolean optionsSuccess = fetchOptionChainData(chain, underlying, referencePrice);
+            boolean optionsSuccess = fetchOptionChainData(chain, underlying, referencePrice, accessToken);
             if (!optionsSuccess) {
                 log.warn("Failed to fetch option chain from Zerodha Kite API");
             }
@@ -154,15 +173,21 @@ public class ZerodhaApiAdapter {
      * Get market quote from Zerodha Kite API
      */
     public Optional<TickSnapshot> getQuote(String symbol) {
-        if (!zerodhaEnabled || apiKey.isEmpty() || accessToken.isEmpty()) {
-            log.warn("Zerodha API is disabled or credentials not provided, cannot fetch quote");
+        if (!zerodhaEnabled || apiKey.isEmpty()) {
+            log.warn("Zerodha API is disabled or API key missing, cannot fetch quote");
+            return Optional.empty();
+        }
+
+        Optional<String> accessTokenOpt = zerodhaSessionService.getAccessToken();
+        if (!accessTokenOpt.isPresent()) {
+            log.warn("No Zerodha access token available while fetching quote");
             return Optional.empty();
         }
         
         try {
             log.info("Fetching quote from Zerodha Kite API for symbol: {}", symbol);
             
-            String response = makeZerodhaApiCall(QUOTES_URL, createQuotePayload(symbol));
+            String response = makeZerodhaApiCall(accessTokenOpt.get(), QUOTES_URL, createQuotePayload(symbol));
             if (response != null && !response.isEmpty()) {
                 return parseQuote(response, symbol);
             }
@@ -174,12 +199,12 @@ public class ZerodhaApiAdapter {
         return Optional.empty();
     }
     
-    private boolean fetchOptionChainData(DerivativesChain chain, String underlying, BigDecimal referencePrice) {
+    private boolean fetchOptionChainData(DerivativesChain chain, String underlying, BigDecimal referencePrice, String accessToken) {
         try {
             log.info("Fetching option chain data from Zerodha Kite API for {}", underlying);
             
             // Get NIFTY option instruments
-            List<ZerodhaInstrument> optionInstruments = getNiftyOptionInstruments(underlying, referencePrice);
+            List<ZerodhaInstrument> optionInstruments = getNiftyOptionInstruments(underlying, referencePrice, accessToken);
             if (optionInstruments.isEmpty()) {
                 log.warn("No option instruments found for {}", underlying);
                 return false;
@@ -199,7 +224,7 @@ public class ZerodhaApiAdapter {
             
             for (int i = 0; i < tokens.size(); i += batchSize) {
                 List<String> batch = tokens.subList(i, Math.min(i + batchSize, tokens.size()));
-                String quoteResponse = fetchQuotes(batch);
+                String quoteResponse = fetchQuotes(batch, accessToken);
                 
                 if (quoteResponse != null && !quoteResponse.isEmpty()) {
                     parseOptionChainQuotes(quoteResponse, optionInstruments, chain);
@@ -215,12 +240,12 @@ public class ZerodhaApiAdapter {
         return false;
     }
     
-    private boolean fetchFuturesData(DerivativesChain chain, String underlying) {
+    private boolean fetchFuturesData(DerivativesChain chain, String underlying, String accessToken) {
         try {
             log.info("Fetching futures data from Zerodha Kite API for {}", underlying);
             
             // Get NIFTY futures instruments
-            List<ZerodhaInstrument> futuresInstruments = getNiftyFuturesInstruments(underlying);
+            List<ZerodhaInstrument> futuresInstruments = getNiftyFuturesInstruments(underlying, accessToken);
             if (futuresInstruments.isEmpty()) {
                 log.warn("No futures instruments found for {}", underlying);
                 return false;
@@ -234,7 +259,7 @@ public class ZerodhaApiAdapter {
                 .map(i -> "NFO:" + i.getTradingsymbol())
                 .collect(Collectors.toList());
             
-            String quoteResponse = fetchQuotes(tokens);
+            String quoteResponse = fetchQuotes(tokens, accessToken);
             
             if (quoteResponse != null && !quoteResponse.isEmpty()) {
                 parseFuturesQuotes(quoteResponse, futuresInstruments, chain);
@@ -247,7 +272,12 @@ public class ZerodhaApiAdapter {
         return false;
     }
     
-    private String makeZerodhaApiCall(String urlString, String queryParams) throws IOException {
+    private String makeZerodhaApiCall(String accessToken, String urlString, String queryParams) throws IOException {
+        if (!StringUtils.hasText(accessToken)) {
+            log.warn("Missing Zerodha access token for API call to {}", urlString);
+            return null;
+        }
+
         try {
             String fullUrl = urlString;
             if (queryParams != null && !queryParams.isEmpty()) {
@@ -314,6 +344,10 @@ public class ZerodhaApiAdapter {
                 errorReader.close();
                 
                 log.warn("Zerodha Kite API returned error code: {} with response: {}", responseCode, errorResponse.toString());
+                if (responseCode == 401 || responseCode == 403) {
+                    log.warn("Zerodha responded with authentication error ({}). Clearing cached session.", responseCode);
+                    zerodhaSessionService.clearSession();
+                }
                 return null;
             }
         } catch (Exception e) {
@@ -325,7 +359,7 @@ public class ZerodhaApiAdapter {
     /**
      * Fetch instruments list from Zerodha API
      */
-    private List<ZerodhaInstrument> getInstruments(String exchange) throws IOException {
+    private List<ZerodhaInstrument> getInstruments(String exchange, String accessToken) throws IOException {
         // Check cache (instruments are updated daily)
         LocalDate today = LocalDate.now();
         if (cachedInstruments != null && instrumentsCacheDate != null && instrumentsCacheDate.equals(today)) {
@@ -341,7 +375,7 @@ public class ZerodhaApiAdapter {
             url += "/" + exchange;
         }
         
-        String csvResponse = makeZerodhaApiCall(url, null);
+        String csvResponse = makeZerodhaApiCall(accessToken, url, null);
         if (csvResponse == null || csvResponse.isEmpty()) {
             log.error("Failed to fetch instruments list");
             return Collections.emptyList();
@@ -425,8 +459,8 @@ public class ZerodhaApiAdapter {
      * Get NIFTY option instruments (CE and PE)
      * Dynamic filtering: Get options for current month, if empty get next month
      */
-    private List<ZerodhaInstrument> getNiftyOptionInstruments(String underlying, BigDecimal referencePrice) throws IOException {
-        List<ZerodhaInstrument> allInstruments = getInstruments("NFO");
+    private List<ZerodhaInstrument> getNiftyOptionInstruments(String underlying, BigDecimal referencePrice, String accessToken) throws IOException {
+        List<ZerodhaInstrument> allInstruments = getInstruments("NFO", accessToken);
         LocalDate today = LocalDate.now();
 
         List<ZerodhaInstrument> niftyOptions = allInstruments.stream()
@@ -507,8 +541,8 @@ public class ZerodhaApiAdapter {
     /**
      * Get NIFTY futures instruments
      */
-    private List<ZerodhaInstrument> getNiftyFuturesInstruments(String underlying) throws IOException {
-        List<ZerodhaInstrument> allInstruments = getInstruments("NFO");
+    private List<ZerodhaInstrument> getNiftyFuturesInstruments(String underlying, String accessToken) throws IOException {
+        List<ZerodhaInstrument> allInstruments = getInstruments("NFO", accessToken);
         LocalDate today = LocalDate.now();
         
         // Filter for NIFTY futures
@@ -562,19 +596,18 @@ public class ZerodhaApiAdapter {
     /**
      * Fetch quotes for multiple instrument tokens
      */
-    private String fetchQuotes(List<String> tokens) throws IOException {
+    private String fetchQuotes(List<String> tokens, String accessToken) throws IOException {
         if (tokens.isEmpty()) {
             return null;
         }
         
-        // Build query string: i=TOKEN1&i=TOKEN2&i=TOKEN3...
-        StringBuilder queryBuilder = new StringBuilder();
-        for (int i = 0; i < tokens.size(); i++) {
-            if (i > 0) queryBuilder.append("&");
-            queryBuilder.append("i=").append(URLEncoder.encode(tokens.get(i), StandardCharsets.UTF_8));
+        // Build query string: depth=true&oi=true&i=TOKEN1&i=TOKEN2...
+        StringBuilder queryBuilder = new StringBuilder("depth=true&oi=true");
+        for (String token : tokens) {
+            queryBuilder.append("&i=").append(URLEncoder.encode(token, StandardCharsets.UTF_8));
         }
         
-        return makeZerodhaApiCall(QUOTES_URL, queryBuilder.toString());
+        return makeZerodhaApiCall(accessToken, QUOTES_URL, queryBuilder.toString());
     }
     
     private String createSpotPricePayload(String underlying) {

@@ -51,9 +51,7 @@ services:
       ZERODHA_ENABLED: "${ZERODHA_ENABLED:-true}"
       ZERODHA_API_KEY: "${ZERODHA_API_KEY:-hvgaaodyzyhzq57s}"
       ZERODHA_API_SECRET: "${ZERODHA_API_SECRET:-r6t8jx9lk6xb1vrckgwrqi4owjd2u314}"
-      ZERODHA_REDIRECT_URI: "${ZERODHA_REDIRECT_URI:-https://zerodhadashboard.duckdns.org/api/zerodha/callback}"
-      ZERODHA_ACCESS_TOKEN: "63VhddceoKtjNczUZ6hAupIf4sXSHtTE"
-      # Updated: 2025-11-06 - Token refreshed via OAuth
+      ZERODHA_REDIRECT_URI: "${ZERODHA_REDIRECT_URI:-https://reed-shaped-spoke-sealed.trycloudflare.com/api/zerodha/callback}"
       # Mock Data Configuration (DISABLED when Zerodha is enabled)
       MOCK_DATA_ENABLED: "${MOCK_DATA_ENABLED:-false}"
       MOCK_SPOT_PRICE: "${MOCK_SPOT_PRICE:-25000}"

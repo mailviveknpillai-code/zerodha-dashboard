@@ -18,9 +18,25 @@ const USE_MOCK_DATA = isMockModeEnabled();
 // Use mock client if enabled, otherwise use real API
 const client = USE_MOCK_DATA ? mockClient : null;
 
+function resolveBaseUrl() {
+  if (import.meta.env.VITE_BACKEND_BASE_URL) {
+    return import.meta.env.VITE_BACKEND_BASE_URL;
+  }
+
+  if (typeof window !== 'undefined') {
+    const { hostname, origin } = window.location;
+    if (hostname && hostname !== 'localhost' && hostname !== '127.0.0.1') {
+      return origin;
+    }
+  }
+
+  return 'http://localhost:9000';
+}
+
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_BACKEND_BASE_URL || 'http://localhost:9000',
-  timeout: 5000,
+  baseURL: resolveBaseUrl(),
+  timeout: 15000,
+  timeoutErrorMessage: 'The request took too long to respond. Please retry in a moment.',
 });
 
 // Export mock mode status for debugging
@@ -95,6 +111,36 @@ export async function fetchStrikePriceMonitoring(underlying = 'NIFTY') {
     return res.data;
   } catch (error) {
     console.error("fetchStrikePriceMonitoring error:", error);
+    throw error;
+  }
+}
+
+export async function fetchZerodhaAuthUrl() {
+  try {
+    const res = await api.get('/api/zerodha/auth-url');
+    return res.data;
+  } catch (error) {
+    console.error('fetchZerodhaAuthUrl error:', error);
+    throw error;
+  }
+}
+
+export async function fetchZerodhaSession() {
+  try {
+    const res = await api.get('/api/zerodha/session');
+    return res.data;
+  } catch (error) {
+    console.error('fetchZerodhaSession error:', error);
+    throw error;
+  }
+}
+
+export async function logoutZerodhaSession() {
+  try {
+    const res = await api.post('/api/zerodha/logout');
+    return res.data;
+  } catch (error) {
+    console.error('logoutZerodhaSession error:', error);
     throw error;
   }
 }
