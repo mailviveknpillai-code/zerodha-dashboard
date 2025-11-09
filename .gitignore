@@ -1,0 +1,90 @@
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# IDE & editor folders
+.idea/
+.vscode/
+*.swp
+*.swo
+.history/
+
+# Environment files
+.env
+.env.local
+*.local
+*.env.*
+# Allow checked-in mock env for UI smoke testing
+!frontend/dashboard-ui/.env.mock
+
+# Root level logs & transient outputs
+*.log
+quick-tunnel.log
+tunnel-*.txt
+*.out
+*.err
+*.pid
+*.seed
+*.tmp
+*.temp
+*.bak
+*.orig
+
+# Generic runtime folders
+logs/
+tmp/
+temp/
+cache/
+.cache/
+
+# Temporary capture files
+sample-derivatives.json
+hboard
+hboardbackenddashboard
+
+# Cloudflare binaries
+cloudflared.exe
+
+# Frontend build artifacts
+frontend/dashboard-ui/node_modules/
+frontend/dashboard-ui/dist/
+frontend/dashboard-ui/.vite/
+frontend/dashboard-ui/.turbo/
+frontend/dashboard-ui/coverage/
+frontend/dashboard-ui/.eslintcache
+frontend/dashboard-ui/.stylelintcache
+frontend/dashboard-ui/.parcel-cache/
+frontend/dashboard-ui/*.log
+
+# Backend build artifacts
+backend/dashboard/target/
+backend/dashboard/logs/
+backend/dashboard/.gradle/
+backend/dashboard/.mvn/
+backend/dashboard/.idea/
+
+# Testing artifacts
+coverage/
+reports/
+*.coverage
+*.lcov
+
+# General Docker / Compose overrides
+docker-compose.override.yml
+*.iml
+*.ipr
+*.iws
+
+# Miscellaneous
+*.patch
+*.diff
+*.tgz
+*.zip
+
+# PowerShell history
+*.pshistory
+*.ps~
+
+
+
+
