@@ -16,6 +16,12 @@
   <version>0.0.1-SNAPSHOT</version>
   <name>zerodha-dashboard-backend</name>
 
+  <packaging>pom</packaging>
+
+  <modules>
+    <module>dashboard</module>
+  </modules>
+
   <properties>
     <java.version>21</java.version>
   </properties>

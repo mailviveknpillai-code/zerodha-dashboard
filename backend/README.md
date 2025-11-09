@@ -17,9 +17,10 @@ curl -sS http://localhost:8080/actuator/health
 
 ## Docker / Compose (dev/demo)
 
-Start redis and backend via docker-compose:
+Start redis and backend via docker-compose (run from repo root):
 
 ```bash
+# From repo root directory
 docker compose up -d redis
 # build backend image (uses backend/Dockerfile)
 docker compose build backend
@@ -34,7 +35,7 @@ curl -sS http://localhost:8080/actuator/health
 
 ## Demo steps
 
-1. Start compose `docker compose up -d redis backend` (or build backend image then run).
+1. Start compose from repo root: `docker compose up -d redis backend` (or build backend image then run).
 2. Seed demo data:
 
 ```bash

@@ -1,3 +1,12 @@
+# Custom network with static IP range for Breeze API configuration
+networks:
+  zerodha-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+          gateway: 172.20.0.1
+
 services:
   # 1. Redis Service (Database for both application and tests)
   redis:
@@ -6,6 +15,9 @@ services:
     hostname: redis
     ports:
       - "6379:6379"
+    networks:
+      zerodha-network:
+        ipv4_address: 172.20.0.10
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -16,18 +28,87 @@ services:
   backend:
     build:
       context: ./backend
-      dockerfile: Dockerfile
+      dockerfile: dashboard/Dockerfile
     container_name: zerodha-backend
     ports:
-      - "8080:8080"
+      - "9000:9000"
+    networks:
+      zerodha-network:
+        ipv4_address: 172.20.0.20
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      SERVER_PORT: 9000
+      # Breeze API configuration (DISABLED - Using Zerodha instead)
+      BREEZE_API_ENABLED: "${BREEZE_API_ENABLED:-false}"
+      BREEZE_API_APPKEY: "${BREEZE_API_APPKEY:-2!T0h64f315119F87^2%8L60245j43p2}"
+      BREEZE_API_SECRETKEY: "${BREEZE_API_SECRETKEY:-700U1T8l62632u`oT48`2456M6n62275}"
+      BREEZE_API_SESSIONTOKEN: "${BREEZE_API_SESSIONTOKEN:-53489091}"
+      # Static IP configuration for Breeze API
+      BREEZE_API_STATIC_IP: "122.167.184.90"
+      BREEZE_API_NETWORK_INTERFACE: "eth0"
+      # Zerodha Kite API (ENABLED - Primary API)
+      ZERODHA_ENABLED: "${ZERODHA_ENABLED:-true}"
+      ZERODHA_API_KEY: "${ZERODHA_API_KEY:-hvgaaodyzyhzq57s}"
+      ZERODHA_API_SECRET: "${ZERODHA_API_SECRET:-r6t8jx9lk6xb1vrckgwrqi4owjd2u314}"
+      ZERODHA_REDIRECT_URI: "${ZERODHA_REDIRECT_URI:-https://reed-shaped-spoke-sealed.trycloudflare.com/api/zerodha/callback}"
+      # Mock Data Configuration (DISABLED when Zerodha is enabled)
+      MOCK_DATA_ENABLED: "${MOCK_DATA_ENABLED:-false}"
+      MOCK_SPOT_PRICE: "${MOCK_SPOT_PRICE:-25000}"
+      MOCK_UNDERLYING: "${MOCK_UNDERLYING:-NIFTY}"
     depends_on:
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9000/api/zerodha/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # 3. Test Runner Service (Where Testcontainers runs)
+  # 3. Frontend Service (React + Vite + Nginx)
+  frontend:
+    build:
+      context: ./frontend/dashboard-ui
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_BASE_URL=http://backend:9000
+    image: zerodha-dashboard-frontend:latest
+    container_name: zerodha-frontend
+    ports:
+      - "5173:80"
+    networks:
+      zerodha-network:
+        ipv4_address: 172.20.0.30
+    depends_on:
+      - backend
+    environment:
+      - VITE_API_BASE_URL=http://backend:9000
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost/ || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # 4. Frontend Development Service (Hot Reload)
+  frontend-dev:
+    image: node:20-alpine
+    container_name: zerodha-frontend-dev
+    working_dir: /app
+    volumes:
+      - ./frontend/dashboard-ui:/app:cached
+      - /app/node_modules
+    ports:
+      - "5174:5173"
+    networks:
+      zerodha-network:
+        ipv4_address: 172.20.0.40
+    command: sh -c "npm ci --legacy-peer-deps && npm run dev -- --host 0.0.0.0"
+    environment:
+      - VITE_API_BASE_URL=http://backend:9000
+    depends_on:
+      - backend
+
+  # 5. Test Runner Service (Where Testcontainers runs)
   backend-test:
     image: maven:3.9.6-eclipse-temurin-21
     container_name: zerodha-backend-test
@@ -37,6 +118,9 @@ services:
     volumes:
       - ./backend:/app:cached
       - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      zerodha-network:
+        ipv4_address: 172.20.0.50
     environment:
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
@@ -44,6 +128,7 @@ services:
       REDIS_PORT: 6379
       TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE: "/var/run/docker.sock"
       TESTCONTAINERS_RYUK_DISABLED: "true"
+      SPRING_TESTCONTAINERS_ENABLED: "false"
     depends_on:
       redis:
         condition: service_healthy
