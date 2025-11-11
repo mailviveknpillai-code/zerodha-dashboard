@@ -1,6 +1,7 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useCallback, useState, useRef } from 'react';
 import { fetchDerivatives } from '../api/client';
 import { useRefreshInterval } from '../contexts/RefreshIntervalContext';
+import useContinuousPolling from '../hooks/useContinuousPolling';
 
 export const TrendIcon = ({ direction }) => {
   if (direction === 'up') {
@@ -28,81 +29,61 @@ export default function MarketSummary({ symbol }) {
   const [spotTrend, setSpotTrend] = useState('flat');
   const [volumeTrend, setVolumeTrend] = useState('flat');
   const isFetchingRef = useRef(false);
-  const refreshTimerRef = useRef(null);
   const previousSpotRef = useRef(null);
   const previousVolumeRef = useRef(null);
   const { intervalMs } = useRefreshInterval();
 
-  useEffect(() => {
-    let mounted = true;
-    const load = async () => {
-      try {
-        if (isFetchingRef.current) {
-          return;
+  const load = useCallback(async () => {
+    if (isFetchingRef.current) {
+      return;
+    }
+
+    isFetchingRef.current = true;
+    try {
+      const derivativesData = await fetchDerivatives(symbol);
+      if (!derivativesData) return;
+
+      if (derivativesData.spotPrice) {
+        const nextSpot = Number(derivativesData.spotPrice);
+        const previousSpot = previousSpotRef.current;
+        if (previousSpot !== null && Number.isFinite(previousSpot)) {
+          if (nextSpot > previousSpot) setSpotTrend('up');
+          else if (nextSpot < previousSpot) setSpotTrend('down');
+          else setSpotTrend('flat');
         }
-        isFetchingRef.current = true;
-        // Use Zerodha API derivatives data
-        const derivativesData = await fetchDerivatives(symbol);
-        if (mounted && derivativesData) {
-          if (derivativesData.spotPrice) {
-            const nextSpot = Number(derivativesData.spotPrice);
-            const previousSpot = previousSpotRef.current;
-            if (previousSpot !== null && Number.isFinite(previousSpot)) {
-              if (nextSpot > previousSpot) setSpotTrend('up');
-              else if (nextSpot < previousSpot) setSpotTrend('down');
-              else setSpotTrend('flat');
-            }
-            previousSpotRef.current = nextSpot;
-            setSpot(nextSpot);
+        previousSpotRef.current = nextSpot;
+        setSpot(nextSpot);
+      }
+
+      if (derivativesData.lotSize) {
+        setLotSize(derivativesData.lotSize);
+      }
+
+      if (Array.isArray(derivativesData.futures) && derivativesData.futures.length > 0) {
+        const earliestFuture = derivativesData.futures.reduce((earliest, current) =>
+          new Date(current.expiryDate) < new Date(earliest.expiryDate) ? current : earliest
+        );
+        setExpiry(new Date(earliestFuture.expiryDate).toLocaleDateString('en-GB'));
+        const parsedVolume = Number(earliestFuture.volume);
+        if (Number.isFinite(parsedVolume)) {
+          const previousVolume = previousVolumeRef.current;
+          if (previousVolume !== null && Number.isFinite(previousVolume)) {
+            if (parsedVolume > previousVolume) setVolumeTrend('up');
+            else if (parsedVolume < previousVolume) setVolumeTrend('down');
+            else setVolumeTrend('flat');
           }
-          if (derivativesData.lotSize) {
-            setLotSize(derivativesData.lotSize);
-          }
-          if (derivativesData.futures && derivativesData.futures.length > 0) {
-            // Get the earliest expiry date
-            const earliestFuture = derivativesData.futures.reduce((earliest, current) => {
-              return new Date(current.expiryDate) < new Date(earliest.expiryDate) ? current : earliest;
-            });
-            setExpiry(new Date(earliestFuture.expiryDate).toLocaleDateString('en-GB'));
-            const parsedVolume = Number(earliestFuture.volume);
-            if (Number.isFinite(parsedVolume)) {
-              const previousVolume = previousVolumeRef.current;
-              if (previousVolume !== null && Number.isFinite(previousVolume)) {
-                if (parsedVolume > previousVolume) setVolumeTrend('up');
-                else if (parsedVolume < previousVolume) setVolumeTrend('down');
-                else setVolumeTrend('flat');
-              }
-              previousVolumeRef.current = parsedVolume;
-              setVolume(parsedVolume);
-            }
-          }
+          previousVolumeRef.current = parsedVolume;
+          setVolume(parsedVolume);
         }
-      } catch (error) {
-        console.error('Error loading spot price:', error);
-      } finally {
-        isFetchingRef.current = false;
       }
-    };
-    const scheduleNext = () => {
-      if (!mounted) return;
-      refreshTimerRef.current = setTimeout(async () => {
-        await load();
-        scheduleNext();
-      }, intervalMs);
-    };
-    load().then(() => {
-      if (mounted) {
-        scheduleNext();
-      }
-    });
-    return () => { 
-      mounted = false; 
-      if (refreshTimerRef.current) {
-        clearTimeout(refreshTimerRef.current);
-      }
+    } catch (error) {
+      console.error('Error loading spot price:', error);
+    } finally {
       isFetchingRef.current = false;
-    };
-  }, [symbol, intervalMs]);
+    }
+  }, [symbol]);
+
+  useContinuousPolling(load, intervalMs, [symbol]);
 
   const refreshLabel = `${(intervalMs / 1000).toFixed(2)}s`;
 

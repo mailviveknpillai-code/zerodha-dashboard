@@ -1,69 +1,39 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fetchStrikePriceMonitoring } from '../api/client';
 import BackButton from './BackButton';
 import { useRefreshInterval } from '../contexts/RefreshIntervalContext';
 import DataCell from './common/DataCell';
+import useContinuousPolling from '../hooks/useContinuousPolling';
 
 export default function StrikePriceMonitoring() {
   const [monitoringData, setMonitoringData] = useState(null);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
   const isFetchingRef = useRef(false);
-  const refreshTimerRef = useRef(null);
   const { intervalMs } = useRefreshInterval();
 
-  useEffect(() => {
-    let mounted = true;
-    
-    const loadMonitoringData = async () => {
-      try {
-        if (isFetchingRef.current) {
-          return;
-        }
-        isFetchingRef.current = true;
-        console.log('🚀 StrikePriceMonitoring: Loading strike price monitoring data...');
-        const data = await fetchStrikePriceMonitoring('NIFTY');
-        console.log('✅ StrikePriceMonitoring: Data loaded:', data);
-        if (mounted) {
-          setMonitoringData(data);
-        }
-      } catch (error) {
-        console.error('❌ StrikePriceMonitoring: Error loading data:', error);
-        if (mounted && error?.response?.status === 401) {
-          navigate('/', { replace: true });
-          return;
-        }
-      } finally {
-        if (mounted) {
-          setLoading(false);
-        }
-        isFetchingRef.current = false;
-      }
-    };
+  const loadMonitoringData = useCallback(async () => {
+    if (isFetchingRef.current) {
+      return;
+    }
 
-    const scheduleNext = () => {
-      if (!mounted) return;
-      refreshTimerRef.current = setTimeout(async () => {
-        await loadMonitoringData();
-        scheduleNext();
-      }, intervalMs);
-    };
-
-    loadMonitoringData().then(() => {
-      if (mounted) {
-        scheduleNext();
+    isFetchingRef.current = true;
+    try {
+      const data = await fetchStrikePriceMonitoring('NIFTY');
+      setMonitoringData(data);
+      setLoading(false);
+    } catch (error) {
+      console.error('❌ StrikePriceMonitoring: Error loading data:', error);
+      if (error?.response?.status === 401) {
+        navigate('/', { replace: true });
       }
-    });
-
-    return () => {
-      mounted = false;
-      if (refreshTimerRef.current) {
-        clearTimeout(refreshTimerRef.current);
-      }
+    } finally {
       isFetchingRef.current = false;
-    };
-  }, [navigate, intervalMs]); // Dependency on navigate for proper redirects
+    }
+  }, [navigate]);
+
+  useContinuousPolling(loadMonitoringData, intervalMs, [navigate]);
 
   const renderContractRow = (contract, index) => {
     const change = contract.change ? Number(contract.change) : 0;

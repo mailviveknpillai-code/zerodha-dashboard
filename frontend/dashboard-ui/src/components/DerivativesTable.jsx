@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { fetchDerivatives } from '../api/client';
 import BackButton from './BackButton';
 import { useRefreshInterval } from '../contexts/RefreshIntervalContext';
 import DataCell from './common/DataCell';
+import useContinuousPolling from '../hooks/useContinuousPolling';
 
 const DerivativesTable = ({ underlying = 'NIFTY' }) => {
   const [derivativesData, setDerivativesData] = useState(null);
@@ -10,33 +11,9 @@ const DerivativesTable = ({ underlying = 'NIFTY' }) => {
   const [error, setError] = useState(null);
   const [selectedSegment, setSelectedSegment] = useState('ALL');
   const inFlightRef = useRef(false);
-  const timerRef = useRef(null);
   const { intervalMs } = useRefreshInterval();
 
-  useEffect(() => {
-    let mounted = true;
-    const scheduleNext = () => {
-      if (!mounted) return;
-      timerRef.current = setTimeout(async () => {
-        await loadDerivativesData();
-        scheduleNext();
-      }, intervalMs);
-    };
-    loadDerivativesData().then(() => {
-      if (mounted) {
-        scheduleNext();
-      }
-    });
-    return () => {
-      mounted = false;
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-      }
-      inFlightRef.current = false;
-    };
-  }, [underlying, intervalMs]);
-
-  const loadDerivativesData = async () => {
+  const loadDerivativesData = useCallback(async () => {
     try {
       if (inFlightRef.current) {
         return;
@@ -53,7 +30,9 @@ const DerivativesTable = ({ underlying = 'NIFTY' }) => {
       setLoading(false);
       inFlightRef.current = false;
     }
-  };
+  }, [underlying]);
+
+  useContinuousPolling(loadDerivativesData, intervalMs, [underlying]);
 
   const getSegmentColor = (segment) => {
     switch (segment) {
