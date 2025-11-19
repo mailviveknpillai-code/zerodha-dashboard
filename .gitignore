@@ -14,6 +14,8 @@ Thumbs.db
 .env.local
 *.local
 *.env.*
+# Allow checked-in mock env for UI smoke testing
+!frontend/dashboard-ui/.env.mock
 
 # Root level logs & transient outputs
 *.log

@@ -1,66 +1,81 @@
 import React, { useState } from 'react';
-import ToggleSwitch from './ToggleSwitch';
 import { useTheme } from '../contexts/ThemeContext';
+import useMarketTrend from '../hooks/useMarketTrend';
 
-export default function CollapsibleRightPanel({ 
-  blinkEnabled, 
-  onBlinkToggle, 
-  animateEnabled, 
-  onAnimateToggle 
-}) {
+export default function CollapsibleRightPanel({ derivativesData }) {
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const { isDarkMode, toggleDarkMode } = useTheme();
+  const { isDarkMode } = useTheme();
+  const marketTrend = useMarketTrend(derivativesData);
+
+  const containerClasses = [
+    'transition-all duration-300 ease-in-out border-l',
+    isCollapsed ? 'w-12' : 'w-80',
+    isDarkMode ? 'bg-slate-800 border-slate-600 text-slate-200' : 'bg-white border-gray-200 text-gray-900',
+  ].join(' ');
+
+  const headerButtonClasses = [
+    'p-2 rounded-lg transition-colors',
+    isDarkMode ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-gray-100 text-gray-600',
+  ].join(' ');
+
+  const sectionDivider = isDarkMode ? 'border-slate-600' : 'border-gray-200';
+
+  if (!marketTrend) {
+    return null;
+  }
+
+  const trendColor = marketTrend.classification === 'Bullish'
+    ? 'bg-green-500/20 text-green-600 dark:text-green-400 border-green-500/30'
+    : marketTrend.classification === 'Bearish'
+    ? 'bg-red-500/20 text-red-600 dark:text-red-400 border-red-500/30'
+    : 'bg-gray-500/20 text-gray-600 dark:text-gray-400 border-gray-500/30';
+
+  const trendDot = marketTrend.classification === 'Bullish'
+    ? 'bg-green-500'
+    : marketTrend.classification === 'Bearish'
+    ? 'bg-red-500'
+    : 'bg-gray-500';
 
   return (
-    <div className={`bg-white dark:bg-slate-800 border-l border-gray-200 dark:border-gray-600 transition-all duration-300 ease-in-out ${
-      isCollapsed ? 'w-12' : 'w-80'
-    }`}>
-      <div className="flex items-center justify-between p-2 border-b border-gray-200 dark:border-gray-600">
-              <button
-                onClick={() => setIsCollapsed(!isCollapsed)}
-                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                title={isCollapsed ? 'Expand panel' : 'Collapse panel'}
-              >
-                <svg 
-                  className={`w-5 h-5 text-gray-600 dark:text-gray-300 transition-transform duration-200 ${
-                    isCollapsed ? '' : 'rotate-180'
-                  }`} 
-                  fill="none" 
-                  stroke="currentColor" 
-                  viewBox="0 0 24 24"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
-              </button>
-        {!isCollapsed && (
-          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Settings</h3>
-        )}
+    <div className={containerClasses}>
+      <div className={`flex items-center justify-between p-2 border-b ${sectionDivider}`}>
+        <button
+          onClick={() => setIsCollapsed(!isCollapsed)}
+          className={headerButtonClasses}
+          title={isCollapsed ? 'Expand panel' : 'Collapse panel'}
+        >
+          <svg
+            className={`w-5 h-5 transition-transform duration-200 ${isCollapsed ? '' : 'rotate-180'}`}
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+        {!isCollapsed && <h3 className="text-sm font-medium">Market Trend</h3>}
       </div>
-      
+
       {!isCollapsed && (
-        <div className="p-4 space-y-1">
-          <ToggleSwitch
-            enabled={isDarkMode}
-            onChange={toggleDarkMode}
-            label="Dark Mode"
-            description="Switch between light and dark themes"
-            className="border-b border-gray-200 dark:border-gray-600"
-          />
-          
-          <ToggleSwitch
-            enabled={blinkEnabled}
-            onChange={onBlinkToggle}
-            label="Blink Alerts"
-            description="Blink when price goes below strike"
-            className="border-b border-gray-200 dark:border-gray-600"
-          />
-          
-          <ToggleSwitch
-            enabled={animateEnabled}
-            onChange={onAnimateToggle}
-            label="Animate Deltas"
-            description="Animate price change indicators"
-          />
+        <div className="p-4 space-y-4">
+          <div className={`rounded-lg border p-4 ${trendColor}`}>
+            <div className="flex items-center gap-3 mb-2">
+              <span className={`inline-block w-3 h-3 rounded-full ${trendDot}`}></span>
+              <span className="text-lg font-semibold">{marketTrend.classification}</span>
+            </div>
+            {marketTrend.score !== null && marketTrend.score !== undefined && (
+              <div className="text-xs opacity-75 mt-1">
+                Score: {marketTrend.score > 0 ? '+' : ''}{marketTrend.score.toFixed(2)}
+              </div>
+            )}
+          </div>
+
+          <div className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-gray-500'} border-t ${sectionDivider} pt-4`}>
+            <p className="mb-2 font-medium">Main Table Strike</p>
+            <p className="text-[10px] leading-relaxed">
+              Trend indicator for the current refresh cycle based on futures, calls, and puts data.
+            </p>
+          </div>
         </div>
       )}
     </div>

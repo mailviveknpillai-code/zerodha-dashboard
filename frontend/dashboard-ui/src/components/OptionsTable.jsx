@@ -1,235 +1,91 @@
-import React, { useEffect, useRef } from 'react';
-import { getPriceTrackingClass } from '../hooks/usePriceTracking';
+import React from 'react';
+import DataCell from './common/DataCell';
+import { useTheme } from '../contexts/ThemeContext';
+import { useContractColoringContext } from '../contexts/ContractColorContext';
 
-export default function OptionsTable({ 
-  title, 
-  data, 
-  blinkEnabled, 
-  animateEnabled, 
+export default function OptionsTable({
+  title,
+  data,
   dailyStrikePrice,
   collapsible = false,
   collapsed = false,
   onToggle,
-  headerExtras = null
+  headerExtras = null,
+  enableColoring = false,
+  headerSlot = null,
 }) {
-  // Track starting values for price movement monitoring
-  const startingValuesRef = useRef(new Map());
-
-  const extractPairValue = (value, partIndex) => {
-    if (!value || value === '-' || value === '—') return '-';
-    const parts = String(value).split('/');
-    if (parts.length <= partIndex) return String(value);
-    const part = parts[partIndex].trim();
-    return part !== '' ? part : '-';
-  };
-
-  // Track starting values for each cell independently
-  useEffect(() => {
-    if (collapsed) return;
-    if (data && data.length > 0) {
-      data.forEach((row, index) => {
-        if (row.isHeader || row.isSubHeader) return;
-        
-        const baseKey = row.instrumentToken || `${row.tradingsymbol || row.segment}-${index}`;
-        
-        // Track LTP
-        if (row.ltp && row.ltp !== '-' && row.ltp !== '—') {
-          const ltpKey = `${baseKey}-ltp`;
-          if (!startingValuesRef.current.has(ltpKey)) {
-            const numValue = Number(row.ltp);
-            if (!isNaN(numValue)) startingValuesRef.current.set(ltpKey, numValue);
-          }
-        }
-        
-        // Track OI
-        if (row.oi && row.oi !== '-' && row.oi !== '—') {
-          const oiKey = `${baseKey}-oi`;
-          if (!startingValuesRef.current.has(oiKey)) {
-            const numValue = Number(row.oi.replace(/,/g, ''));
-            if (!isNaN(numValue)) startingValuesRef.current.set(oiKey, numValue);
-          }
-        }
-        
-        // Track Volume
-        if (row.vol && row.vol !== '-' && row.vol !== '—') {
-          const volKey = `${baseKey}-vol`;
-          if (!startingValuesRef.current.has(volKey)) {
-            const numValue = Number(row.vol.replace(/,/g, ''));
-            if (!isNaN(numValue)) startingValuesRef.current.set(volKey, numValue);
-          }
-        }
-        
-        // Track Bid
-        if (row.bid && row.bid !== '-' && row.bid !== '—') {
-          const bidKey = `${baseKey}-bid`;
-          if (!startingValuesRef.current.has(bidKey)) {
-            const numValue = Number(extractPairValue(row.bid, 0));
-            if (!isNaN(numValue)) startingValuesRef.current.set(bidKey, numValue);
-          }
-        }
-        
-        // Track Ask
-        if (row.ask && row.ask !== '-' && row.ask !== '—') {
-          const askKey = `${baseKey}-ask`;
-          if (!startingValuesRef.current.has(askKey)) {
-            const numValue = Number(extractPairValue(row.ask, 1));
-            if (!isNaN(numValue)) startingValuesRef.current.set(askKey, numValue);
-          }
-        }
-        
-        // Track Bid Qty
-        if (row.bidQty && row.bidQty !== '-' && row.bidQty !== '—') {
-          const bidQtyKey = `${baseKey}-bidQty`;
-          if (!startingValuesRef.current.has(bidQtyKey)) {
-            const numValue = Number(extractPairValue(row.bidQty, 0).replace(/,/g, ''));
-            if (!isNaN(numValue)) startingValuesRef.current.set(bidQtyKey, numValue);
-          }
-        }
-        
-        // Track Ask Qty
-        if (row.askQty && row.askQty !== '-' && row.askQty !== '—') {
-          const askQtyKey = `${baseKey}-askQty`;
-          if (!startingValuesRef.current.has(askQtyKey)) {
-            const numValue = Number(extractPairValue(row.askQty, 1).replace(/,/g, ''));
-            if (!isNaN(numValue)) startingValuesRef.current.set(askQtyKey, numValue);
-          }
-        }
-        
-        // Track Change (Delta)
-        if (row.change && row.change !== '-' && row.change !== '—') {
-          const changeKey = `${baseKey}-change`;
-          if (!startingValuesRef.current.has(changeKey)) {
-            const numValue = Number(row.change);
-            if (!isNaN(numValue)) startingValuesRef.current.set(changeKey, numValue);
-          }
-        }
-        
-        // Track Change Percent
-        if (row.changePercent && row.changePercent !== '-' && row.changePercent !== '—') {
-          const changePercentKey = `${baseKey}-changePercent`;
-          if (!startingValuesRef.current.has(changePercentKey)) {
-            const numValue = Number(row.changePercent);
-            if (!isNaN(numValue)) startingValuesRef.current.set(changePercentKey, numValue);
-          }
-        }
-      });
-    }
-  }, [data, collapsed]);
-  // Helper function to get color coding for LTP based on value
-  const getLTPColor = (ltp, isHeader, isSubHeader) => {
-    if (isHeader || isSubHeader) return 'text-gray-500';
-    if (!ltp || ltp === '-' || ltp === '—') return 'text-gray-400';
-    
-    const value = Number(ltp);
-    if (value > 0) return 'price-up';
-    return 'price-neutral';
-  };
-
-  // Helper function to get color coding for OI based on value
-  const getOIColor = (oi, isHeader, isSubHeader) => {
-    if (isHeader || isSubHeader) return 'text-gray-500';
-    if (!oi || oi === '-' || oi === '—') return 'text-gray-400';
-    
-    const value = Number(oi.replace(/,/g, ''));
-    if (value > 10000) return 'price-up'; // High OI
-    if (value > 5000) return 'price-neutral';
-    return 'price-down'; // Low OI
-  };
-
-  // Helper function to get color coding for Volume based on value
-  const getVolumeColor = (vol, isHeader, isSubHeader) => {
-    if (isHeader || isSubHeader) return 'text-gray-500';
-    if (!vol || vol === '-' || vol === '—') return 'text-gray-400';
-    
-    const value = Number(vol.replace(/,/g, ''));
-    if (value > 1000) return 'price-up'; // High volume
-    if (value > 100) return 'price-neutral';
-    return 'price-down'; // Low volume
-  };
-
-  // Helper function to get color coding for Bid based on LTP movement
-  const getBidColor = (bid, ltp, isHeader, isSubHeader) => {
-    if (isHeader || isSubHeader) return 'text-gray-500';
-    if (!bid || bid === '-' || bid === '—') return 'text-gray-400';
-    
-    const bidValue = Number(bid);
-    const ltpValue = Number(ltp);
-    
-    if (ltpValue > bidValue) return 'price-up'; // LTP above bid (bullish)
-    if (ltpValue < bidValue) return 'price-down'; // LTP below bid (bearish)
-    return 'price-neutral'; // LTP at bid
-  };
-
-  // Helper function to get color coding for Ask based on LTP movement
-  const getAskColor = (ask, ltp, isHeader, isSubHeader) => {
-    if (isHeader || isSubHeader) return 'text-gray-500';
-    if (!ask || ask === '-' || ask === '—') return 'text-gray-400';
-    
-    const askValue = Number(ask);
-    const ltpValue = Number(ltp);
-    
-    if (ltpValue > askValue) return 'price-up'; // LTP above ask (very bullish)
-    if (ltpValue < askValue) return 'price-down'; // LTP below ask (bearish)
-    return 'price-neutral'; // LTP at ask
-  };
-
-  const getBidQtyColor = (bidQty, ltp, isHeader, isSubHeader) => {
-    if (isHeader || isSubHeader) return 'text-gray-500';
-    if (!bidQty || bidQty === '-' || bidQty === '—') return 'text-gray-400';
-    
-    const bidQtyValue = Number(bidQty.replace(/,/g, ''));
-    const ltpValue = Number(ltp);
-    
-    // High bid qty when LTP is above bid (bullish pressure)
-    if (ltpValue > 0 && bidQtyValue > 1000) return 'price-up';
-    if (bidQtyValue > 100) return 'price-neutral';
-    return 'price-down'; // Low bid qty
-  };
-
-  // Helper function to get color coding for Ask Qty based on LTP movement
-  const getAskQtyColor = (askQty, ltp, isHeader, isSubHeader) => {
-    if (isHeader || isSubHeader) return 'text-gray-500';
-    if (!askQty || askQty === '-' || askQty === '—') return 'text-gray-400';
-    
-    const askQtyValue = Number(askQty.replace(/,/g, ''));
-    const ltpValue = Number(ltp);
-    
-    // High ask qty when LTP is below ask (bearish pressure)
-    if (ltpValue > 0 && askQtyValue > 1000) return 'price-up';
-    if (askQtyValue > 100) return 'price-neutral';
-    return 'price-down'; // Low ask qty
-  };
-
-  const getIndicatorIcon = (indicator, isBlinking) => {
-    if (indicator === 'header' || indicator === 'subheader') return '';
-    if (indicator === 'loading') return '⏳';
-    if (indicator === 'error') return '❌';
-    
-    const icon = indicator === 'up' ? '▲' : indicator === 'down' ? '▼' : '●';
-    const color = indicator === 'up' ? 'text-green-500' : indicator === 'down' ? 'text-red-500' : 'text-gray-400';
-    const blinkClass = (isBlinking && blinkEnabled) ? 'strike-alert indicator-pulse' : '';
-    
-    return (
-      <span className={`${color} ${blinkClass} font-bold text-lg`} title={isBlinking && blinkEnabled ? 'Price below strike - Alert!' : ''}>
-        {icon}
-      </span>
-    );
-  };
-
   const hasData = Array.isArray(data) && data.length > 0;
+  const { isDarkMode } = useTheme();
+  const colorContext = useContractColoringContext();
+  
+  // Helper to get delta OI using separate OI cache
+  const getDeltaOi = (contractKey, currentOi) => {
+    if (!colorContext || !contractKey || currentOi === null || currentOi === undefined) {
+      return null;
+    }
+    // Update OI cache (only updates if OI changed) and get delta
+    return colorContext.updateOiCache(contractKey, currentOi);
+  };
+  
+  const formatInteger = (value) => {
+    if (value === null || value === undefined || value === '') return '-';
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? Math.round(numeric).toLocaleString() : String(value);
+  };
+
+  const containerClasses = [
+    'rounded-xl border shadow-sm overflow-hidden mb-6',
+    isDarkMode ? 'bg-slate-800 border-slate-600 text-slate-200' : 'bg-white border-gray-200 text-gray-900',
+  ].join(' ');
+
+  const headerClasses = [
+    'px-4 sm:px-6 border-b',
+    isDarkMode ? 'bg-slate-800/70 border-slate-600' : 'bg-white border-gray-200',
+    hasData && collapsed ? 'py-2' : 'py-4',
+  ].join(' ');
+
+  const titleColor = isDarkMode ? 'text-slate-100' : 'text-gray-900';
+  const subtitleColor = isDarkMode ? 'text-slate-300' : 'text-gray-500';
+  const actionButton = isDarkMode
+    ? 'text-slate-200 hover:text-slate-100 hover:bg-slate-700'
+    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200';
+
+  const tableHeaderClasses = isDarkMode
+    ? 'bg-slate-700/50 text-slate-200'
+    : 'bg-gray-50 text-gray-600';
+
+  const hoverRow = isDarkMode ? 'hover:bg-slate-700/40' : 'hover:bg-blue-50';
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden mb-6">
-      <div className="bg-white px-6 py-4 border-b border-gray-200">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h3 className="font-bold text-lg text-gray-900">{title}</h3>
+    <div 
+      className={`${containerClasses} ${!isDarkMode ? 'table-halo-border' : ''}`}
+      onDoubleClick={collapsible ? onToggle : undefined}
+      style={collapsible ? { cursor: 'pointer' } : {}}
+    >
+      <div 
+        className={headerClasses}
+        onDoubleClick={collapsible ? onToggle : undefined}
+        style={collapsible ? { cursor: 'pointer' } : {}}
+      >
+        <div className={`flex flex-col ${collapsed ? 'gap-2' : 'gap-3'} sm:flex-row sm:items-center sm:justify-between`}>
+          <div className="flex flex-col gap-1">
+            <h3 className={`font-semibold text-base ${isDarkMode ? 'text-slate-300' : 'bg-gradient-to-r from-blue-500 to-purple-500 bg-clip-text text-transparent'} tracking-wide`}>{title}</h3>
+            {dailyStrikePrice != null && (
+              <span className={`text-xs ${subtitleColor}`}>Daily Strike: {dailyStrikePrice}</span>
+            )}
+            {headerSlot && (
+              <div className="mt-1">{headerSlot}</div>
+            )}
+          </div>
           <div className="flex items-center gap-3">
             {headerExtras}
             {collapsible && (
               <button
                 type="button"
                 onClick={onToggle}
-                className="w-8 h-8 flex items-center justify-center text-xl font-bold text-gray-600 hover:text-gray-900 hover:bg-gray-200 rounded-full transition-colors"
+                className={`w-8 h-8 flex items-center justify-center text-xl font-bold rounded-full transition-colors ${actionButton} ${
+                  collapsed ? 'text-base' : ''
+                }`}
                 aria-label={collapsed ? 'Expand table' : 'Collapse table'}
               >
                 {collapsed ? '+' : '−'}
@@ -238,111 +94,242 @@ export default function OptionsTable({
           </div>
         </div>
       </div>
+
       {!collapsed && (hasData ? (
-        <div className="overflow-x-auto">
-        <table className="min-w-[720px] w-full text-sm table-fixed">
-          <colgroup>
-            <col className="w-56" />
-            <col className="w-24" />
-            <col className="w-24" />
-            <col className="w-20" />
-            <col className="w-24" />
-            <col className="w-24" />
-            <col className="w-24" />
-            <col className="w-24" />
-            <col className="w-24" />
-            <col className="w-24" />
-          </colgroup>
-          <thead className="bg-gray-50 text-gray-600 text-xs font-semibold uppercase tracking-wide">
-            <tr>
-              <th className="text-left px-4 py-3">Segment</th>
-              <th className="px-4 py-3 text-right">LTP</th>
-              <th className="px-4 py-3 text-right">Δ Price</th>
-              <th className="px-4 py-3 text-right">%Δ</th>
-              <th className="px-4 py-3 text-right">OI</th>
-              <th className="px-4 py-3 text-right">Vol</th>
-              <th className="px-4 py-3 text-right">Bid</th>
-              <th className="px-4 py-3 text-right">Ask</th>
-              <th className="px-4 py-3 text-right">Bid Qty</th>
-              <th className="px-4 py-3 text-right">Ask Qty</th>
-            </tr>
-          </thead>
+        <div>
+          <table className="w-full text-xs sm:text-sm table-fixed">
+            <colgroup>
+              <col style={{ width: '18%' }} />
+              <col style={{ width: '8%' }} />
+              <col style={{ width: '8%' }} />
+              <col style={{ width: '7%' }} />
+              <col style={{ width: '8%' }} />
+              <col style={{ width: '8%' }} />
+              <col style={{ width: '8%' }} />
+              <col style={{ width: '8%' }} />
+              <col style={{ width: '7%' }} />
+              <col style={{ width: '8%' }} />
+              <col style={{ width: '8%' }} />
+            </colgroup>
+            <thead className={`${tableHeaderClasses} text-xs font-semibold uppercase tracking-wide`}>
+              <tr>
+                <th className="text-left px-3 sm:px-4 py-3">Segment</th>
+                <th className="px-3 sm:px-4 py-3 text-right">LTP</th>
+                <th className="px-3 sm:px-4 py-3 text-right">OI</th>
+                <th className="px-3 sm:px-4 py-3 text-right">Δ OI</th>
+                <th className="px-3 sm:px-4 py-3 text-right">Vol</th>
+                <th className="px-3 sm:px-4 py-3 text-right">Bid</th>
+                <th className="px-3 sm:px-4 py-3 text-right">Ask</th>
+                <th className="px-3 sm:px-4 py-3 text-right">Bid Qty</th>
+                <th className="px-3 sm:px-4 py-3 text-right">ΔB/A QTY</th>
+                <th className="px-3 sm:px-4 py-3 text-right">Ask Qty</th>
+                <th className="px-3 sm:px-4 py-3 text-right">Δ Price</th>
+              </tr>
+            </thead>
             <tbody>
-              {data.map((row, i) => {
-                const baseKey = row.instrumentToken || `${row.tradingsymbol || row.segment}-${i}`;
-                const numericCellBase = 'py-3 px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell';
-                
+              {data
+                .filter(row => !row.isHeader) // Remove "Strike: <value>" header rows
+                .map((row, index) => {
+                const numericCellBase = 'py-2 sm:py-3 px-2 sm:px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis';
+                const borderClass = isDarkMode ? 'border-slate-600/60' : 'border-slate-200/60';
+                const segmentCellClass = `py-2 sm:py-3 px-3 sm:px-4 text-left text-xs sm:text-sm leading-tight border-r ${borderClass} last:border-r-0 ${
+                  row.isHeader
+                    ? `text-sm font-semibold ${isDarkMode ? 'text-slate-200' : 'text-gray-600'} uppercase tracking-wide`
+                    : row.isSubHeader
+                    ? `text-sm font-semibold ${subtitleColor}`
+                    : row.isInfoRow
+                    ? `text-sm ${subtitleColor}`
+                    : `pl-6 sm:pl-8 ${isDarkMode ? 'text-slate-100' : 'text-gray-900'}`
+                }`;
+                const isStaticRow = row.isHeader || row.isSubHeader || row.isInfoRow;
+                const contractId = row.contractKey;
+                const shouldColor = enableColoring && !isStaticRow && contractId;
+
+                const badgeToneClassMap = {
+                  call: 'segment-badge-call',
+                  put: 'segment-badge-put',
+                  'call-itm': 'segment-badge-call-itm',
+                  'call-atm': 'segment-badge-call-atm',
+                  'call-otm': 'segment-badge-call-otm',
+                  'put-itm': 'segment-badge-put-itm',
+                  'put-atm': 'segment-badge-put-atm',
+                  'put-otm': 'segment-badge-put-otm',
+                };
+
+                const badgeToneClass = badgeToneClassMap[row.badgeTone] || 'segment-badge-neutral';
+
+                // Show pills on main page with appropriate format
+                const badgeNode = row.badgeLabel ? (
+                  <span className={`segment-badge ${badgeToneClass}`}>
+                    {row.badgeLabel}
+                  </span>
+                ) : null;
+
+                const hasStrikePrice = row.strikePrice != null && !row.isHeader && !row.isSubHeader && !row.isInfoRow;
+                const strikeDisplay = hasStrikePrice ? `@ ${Number(row.strikePrice).toLocaleString()}` : null;
+
+                const renderSegmentContent = () => {
+                  if (row.isHeader) {
+                    return (
+                      <div className="flex items-center gap-2">
+                        {badgeNode}
+                        {row.segment && <span className="truncate block max-w-[220px]">{row.segment}</span>}
+                      </div>
+                    );
+                  }
+                  if (row.isSubHeader) {
+                    return (
+                      <div className="flex items-center gap-2 text-gray-500">
+                        {badgeNode}
+                        {row.segment && <span className="truncate block max-w-[220px]">{row.segment}</span>}
+                      </div>
+                    );
+                  }
+                  if (row.isInfoRow) {
+                    return <span className="truncate block max-w-[220px]">{row.segment}</span>;
+                  }
+                  // For contract rows with strike price and badge: show pill @ strike price format
+                  if (hasStrikePrice && badgeNode) {
+                    return (
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-2">
+                          {badgeNode}
+                          {strikeDisplay && <span className="text-xs sm:text-sm">{strikeDisplay}</span>}
+                        </div>
+                        <div className="truncate text-xs sm:text-sm opacity-80">
+                          {row.tradingsymbol || row.segment || '-'}
+                        </div>
+                      </div>
+                    );
+                  }
+                  // Fallback for rows without strike price
+                  return (
+                    <div className="flex items-center gap-2">
+                      {badgeNode}
+                      <span className="truncate block max-w-[220px]">{row.segment}</span>
+                    </div>
+                  );
+                };
+
+                const makeColorMeta = (fieldKey) => {
+                  if (!shouldColor) return null;
+                  return {
+                    contractId,
+                    fieldKey,
+                    dayHigh: row.highs?.[fieldKey] ?? null,
+                    dayLow: row.lows?.[fieldKey] ?? null,
+                  };
+                };
+
+                const isHeaderRow = row.isHeader;
+                const rowBorderClass = isHeaderRow
+                  ? 'border-b border-transparent'
+                  : `border-b ${isDarkMode ? 'border-slate-700/60' : 'border-slate-200/70'}`;
+                const rowClassName = `${rowBorderClass} last:border-0 ${hoverRow} transition-colors`;
+
                 return (
-                <tr 
-                  key={i} 
-                  className={`border-b last:border-0 hover:bg-blue-50 ${
-                    row.isHeader ? 'section-header' : 
-                    row.isSubHeader ? 'section-subheader' : 
-                    row.sectionType === 'calls' ? 'calls-section' :
-                    row.sectionType === 'puts' ? 'puts-section' : ''
-                  }`}
-                >
-                  <td className={`py-3 px-4 whitespace-nowrap ${
-                    row.isHeader ? 'text-lg font-bold text-white' : 
-                    row.isSubHeader ? 'text-sm pl-6 font-semibold text-white' : 
-                    'pl-8'
-                  }`}>
-                    {row.segment}
-                  </td>
-                    <td className={`${numericCellBase} ${
-                      getPriceTrackingClass(row.ltp, startingValuesRef.current.get(`${baseKey}-ltp`), row.isHeader || row.isSubHeader)
-                    } ${getLTPColor(row.ltp, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
-                      {row.ltp}
+                  <tr
+                    key={index}
+                    className={rowClassName}
+                  >
+                    <td className={segmentCellClass}>
+                      {renderSegmentContent()}
                     </td>
-                    <td className={`${numericCellBase} ${
-                      getPriceTrackingClass(row.change ? Number(row.change) : 0, startingValuesRef.current.get(`${baseKey}-change`), row.isHeader || row.isSubHeader)
-                    } ${row.isHeader || row.isSubHeader ? 'text-gray-500' :
-                      Number(row.change) > 0 ? 'price-up' : 
-                      Number(row.change) < 0 ? 'price-down' : 'price-neutral'
-                    } ${animateEnabled && !row.isHeader && !row.isSubHeader ? 
-                      (Number(row.change) > 0 ? 'delta-animate-up' : 
-                       Number(row.change) < 0 ? 'delta-animate-down' : '') : ''}`}>
-                      {row.change}
-                    </td>
-                    <td className={`${numericCellBase} ${
-                      getPriceTrackingClass(row.changePercent ? Number(row.changePercent) : 0, startingValuesRef.current.get(`${baseKey}-changePercent`), row.isHeader || row.isSubHeader)
-                    } ${row.isHeader || row.isSubHeader ? 'text-gray-500' :
-                      Number(row.changePercent) > 0 ? 'price-up' : 
-                      Number(row.changePercent) < 0 ? 'price-down' : 'price-neutral'
-                    }`}>
-                      {row.changePercent ? `${row.changePercent}%` : '—'}
-                    </td>
-                    <td className={`${numericCellBase} ${
-                      getPriceTrackingClass(row.oi ? Number(row.oi.replace(/,/g, '')) : 0, startingValuesRef.current.get(`${baseKey}-oi`), row.isHeader || row.isSubHeader)
-                    } ${getOIColor(row.oi, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
-                      {row.oi}
-                    </td>
-                    <td className={`${numericCellBase} ${
-                      getPriceTrackingClass(row.vol ? Number(row.vol.replace(/,/g, '')) : 0, startingValuesRef.current.get(`${baseKey}-vol`), row.isHeader || row.isSubHeader)
-                    } ${getVolumeColor(row.vol, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
-                      {row.vol}
-                    </td>
-                    <td className={`${numericCellBase} ${
-                      getPriceTrackingClass(row.bid ? Number(extractPairValue(row.bid, 0)) : 0, startingValuesRef.current.get(`${baseKey}-bid`), row.isHeader || row.isSubHeader)
-                    } ${getBidColor(extractPairValue(row.bid, 0), row.ltp, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
-                      {extractPairValue(row.bid, 0)}
-                    </td>
-                    <td className={`${numericCellBase} ${
-                      getPriceTrackingClass(row.ask ? Number(extractPairValue(row.ask, 1)) : 0, startingValuesRef.current.get(`${baseKey}-ask`), row.isHeader || row.isSubHeader)
-                    } ${getAskColor(extractPairValue(row.ask, 1), row.ltp, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
-                      {extractPairValue(row.ask, 1)}
-                    </td>
-                    <td className={`${numericCellBase} ${
-                      getPriceTrackingClass(row.bidQty ? Number(extractPairValue(row.bidQty, 0).replace(/,/g, '')) : 0, startingValuesRef.current.get(`${baseKey}-bidQty`), row.isHeader || row.isSubHeader)
-                    } ${getBidQtyColor(extractPairValue(row.bidQty, 0), row.ltp, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
-                      {extractPairValue(row.bidQty, 0)}
-                    </td>
-                    <td className={`${numericCellBase} ${
-                      getPriceTrackingClass(row.askQty ? Number(extractPairValue(row.askQty, 1).replace(/,/g, '')) : 0, startingValuesRef.current.get(`${baseKey}-askQty`), row.isHeader || row.isSubHeader)
-                    } ${getAskQtyColor(extractPairValue(row.askQty, 1), row.ltp, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
-                      {extractPairValue(row.askQty, 1)}
-                    </td>
-                </tr>
+                    <DataCell
+                      value={isStaticRow ? null : row.ltpRaw}
+                      className={`${numericCellBase} ${isStaticRow ? '' : 'font-semibold'}`}
+                      displayValue={row.ltp}
+                      coloringMeta={makeColorMeta('ltp')}
+                    />
+                    <DataCell
+                      value={isStaticRow ? null : row.oiRaw}
+                      className={`${numericCellBase} ${isStaticRow ? '' : 'font-semibold'}`}
+                      displayValue={row.oi}
+                      coloringMeta={makeColorMeta('oi')}
+                    />
+                    {(() => {
+                      // Get delta OI for this row (evaluates OI and retrieves stored delta)
+                      const hasContract = !isStaticRow && row.contractKey;
+                      const hasOiValue = row.oiRaw !== null && row.oiRaw !== undefined;
+                      
+                      let deltaOi = null;
+                      if (hasContract && hasOiValue) {
+                        deltaOi = getDeltaOi(row.contractKey, row.oiRaw);
+                      }
+                      
+                      // Show delta value if available, otherwise empty string (no placeholder)
+                      const deltaOiDisplay = deltaOi !== null && deltaOi !== undefined
+                        ? (deltaOi > 0 ? `+${formatInteger(deltaOi)}` : formatInteger(deltaOi))
+                        : '';
+                      
+                      return (
+                        <DataCell
+                          value={isStaticRow ? null : (row.oiRaw ?? null)}
+                          className={numericCellBase}
+                          displayValue={deltaOiDisplay}
+                          coloringMeta={!isStaticRow && row.contractKey ? makeColorMeta('oi') : null}
+                        />
+                      );
+                    })()}
+                    <DataCell
+                      value={isStaticRow ? null : (row.volRaw ?? null)}
+                      className={`${numericCellBase} ${isStaticRow ? '' : 'font-semibold'}`}
+                      displayValue={row.vol}
+                      coloringMeta={makeColorMeta('vol')}
+                      title={!isStaticRow && row.originalVol != null ? `API Volume: ${Number(row.originalVol).toLocaleString()}` : null}
+                    />
+                    <DataCell
+                      value={isStaticRow ? null : row.bidRaw}
+                      className={`${numericCellBase} ${isStaticRow ? '' : 'font-semibold'}`}
+                      displayValue={row.bid}
+                      coloringMeta={makeColorMeta('bid')}
+                    />
+                    <DataCell
+                      value={isStaticRow ? null : row.askRaw}
+                      className={`${numericCellBase} ${isStaticRow ? '' : 'font-semibold'}`}
+                      displayValue={row.ask}
+                      coloringMeta={makeColorMeta('ask')}
+                    />
+                    <DataCell
+                      value={isStaticRow ? null : row.bidQtyRaw}
+                      className={`${numericCellBase} ${isStaticRow ? '' : 'font-semibold'}`}
+                      displayValue={row.bidQty}
+                      coloringMeta={makeColorMeta('bidQty')}
+                    />
+                    {(() => {
+                      // Calculate ΔB/A QTY = bidQty - askQty
+                      const bidQty = isStaticRow ? null : (row.bidQtyRaw ?? null);
+                      const askQty = isStaticRow ? null : (row.askQtyRaw ?? null);
+                      const deltaBA = bidQty !== null && askQty !== null && Number.isFinite(bidQty) && Number.isFinite(askQty)
+                        ? bidQty - askQty
+                        : null;
+                      
+                      const deltaBADisplay = deltaBA !== null && deltaBA !== undefined
+                        ? (deltaBA > 0 ? `+${formatInteger(deltaBA)}` : formatInteger(deltaBA))
+                        : '';
+                      
+                      return (
+                        <DataCell
+                          value={isStaticRow ? null : deltaBA}
+                          className={`${numericCellBase} ${isStaticRow ? '' : 'font-semibold'}`}
+                          displayValue={deltaBADisplay}
+                          coloringMeta={makeColorMeta('deltaBA')}
+                        />
+                      );
+                    })()}
+                    <DataCell
+                      value={isStaticRow ? null : row.askQtyRaw}
+                      className={`${numericCellBase} ${isStaticRow ? '' : 'font-semibold'}`}
+                      displayValue={row.askQty}
+                      coloringMeta={makeColorMeta('askQty')}
+                    />
+                    <DataCell
+                      value={isStaticRow ? null : row.changeRaw}
+                      className={numericCellBase}
+                      displayValue={row.change}
+                      coloringMeta={makeColorMeta('change')}
+                    />
+                  </tr>
                 );
               })}
             </tbody>
@@ -354,3 +341,4 @@ export default function OptionsTable({
     </div>
   );
 }
+

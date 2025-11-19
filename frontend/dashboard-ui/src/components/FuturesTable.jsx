@@ -1,18 +1,383 @@
-import React, { useMemo, useEffect, useState, useRef } from 'react';
-import { fetchDerivatives } from '../api/client';
-import { getPriceTrackingClass } from '../hooks/usePriceTracking';
+import React, { useEffect, useState, useMemo } from 'react';
+import DataCell from './common/DataCell';
+import { TrendIcon } from './MarketSummary';
+import { useTheme } from '../contexts/ThemeContext';
+import useMarketTrend from '../hooks/useMarketTrend';
+import { useContractColoringContext } from '../contexts/ContractColorContext';
 
-export default function FuturesTable({ spot, baseSymbol, selectedContract, blinkEnabled, animateEnabled, organizedData, summaryStats = [] }) {
-  const [loading, setLoading] = useState(false);
+export default function FuturesTable({
+  spot,
+  baseSymbol,
+  selectedContract,
+  organizedData,
+  summaryStats = [],
+  fullscreenSections = [],
+  connectionWarning = null,
+  derivativesData = null,
+}) {
   const [isFullscreen, setIsFullscreen] = useState(false);
-  // Track starting values for each row to enable price movement tracking
-  const startingValuesRef = useRef(new Map());
+  const [spotTrend, setSpotTrend] = useState('flat');
+  const [volumeTrend, setVolumeTrend] = useState('flat');
+  const previousSpotRef = React.useRef(null);
+  const previousVolumeRef = React.useRef(null);
+  const { isDarkMode } = useTheme();
+  const marketTrend = useMarketTrend(derivativesData);
+  const colorContext = useContractColoringContext();
+  
+  // Helper to get delta OI using separate OI cache
+  const getDeltaOi = (contractKey, currentOi) => {
+    if (!colorContext || !contractKey || currentOi === null || currentOi === undefined) {
+      return null;
+    }
+    // Update OI cache (only updates if OI changed) and get delta
+    return colorContext.updateOiCache(contractKey, currentOi);
+  };
+  
+  const formatInteger = (value) => {
+    if (value === null || value === undefined || value === '') return '-';
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? Math.round(numeric).toLocaleString() : String(value);
+  };
+
+  // Base numeric cell padding - will be overridden for main table contract rows
+  const getNumericCellBase = (key) => {
+    const isMainTableRow = typeof key === 'string' && key.startsWith('main-');
+    const isMainTableContractRow = isMainTableRow && key.includes('main-') && !key.includes('section');
+    // Check if this is a contract row by checking the row data when rendering
+    return 'px-2 sm:px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis';
+  };
+  
+  const numericCellBase =
+    'py-4 sm:py-5 px-2 sm:px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis';
+  const cardBase = isDarkMode ? 'bg-slate-800 border-slate-600 text-slate-200' : 'bg-white border-gray-200 text-gray-900';
+  const headerTitleColor = isDarkMode ? 'text-slate-200' : 'text-gray-900';
+  const headerSubtitleColor = isDarkMode ? 'text-slate-300' : 'text-gray-600';
+  const summaryTextColor = isDarkMode ? 'text-slate-100' : 'text-gray-900';
+  const summarySubtleText = isDarkMode ? 'text-slate-400' : 'text-gray-500';
+  const buttonClasses = isDarkMode
+    ? 'p-2 text-slate-200 hover:text-slate-100 hover:bg-slate-700'
+    : 'p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-200';
+  const hoverRow = isDarkMode ? 'hover:bg-slate-700/40' : 'hover:bg-blue-50';
 
   const formatNumber = (value) => {
     if (value === null || value === undefined || value === '') return '—';
     const numeric = Number(value);
     return Number.isFinite(numeric) ? numeric.toLocaleString() : String(value);
   };
+
+  const renderRow = (row, key) => {
+    const isOptionRow = row.sectionType === 'calls' || row.sectionType === 'puts';
+    const isInfoRow = row.isInfoRow;
+    const isMainTableRow = typeof key === 'string' && (key.startsWith('main-') || key.startsWith('fullscreen-main-'));
+    const isMainTableContractRow = isMainTableRow && !row.isHeader && !row.isSubHeader && !isInfoRow;
+    
+    // Increase row height by 40% for main table contract rows
+    // py-4 = 16px, 40% more = 22.4px; py-5 = 20px, 40% more = 28px
+    const mainTableRowPadding = isMainTableContractRow ? 'py-[22px] sm:py-[28px]' : 'py-4 sm:py-5';
+    const mainTableNumericPadding = isMainTableContractRow ? 'py-[22px] sm:py-[28px]' : 'py-4 sm:py-5';
+    
+    const borderClass = isDarkMode ? 'border-slate-600/60' : 'border-slate-200/60';
+    const segmentCellClass = `${mainTableRowPadding} px-3 sm:px-4 text-left text-xs sm:text-sm leading-tight border-r ${borderClass} last:border-r-0 ${
+      row.isHeader
+        ? `text-sm font-semibold ${isDarkMode ? 'text-slate-200' : 'text-gray-600'} uppercase tracking-wide`
+        : row.isSubHeader
+        ? `text-sm font-semibold ${isDarkMode ? 'text-slate-300' : 'text-gray-500'}`
+        : isInfoRow
+        ? `text-sm ${isDarkMode ? 'text-slate-300' : 'text-gray-500'}`
+        : `pl-6 sm:pl-8 ${isDarkMode ? 'text-slate-100' : 'text-gray-900'}`
+    }`;
+    const isStaticRow = row.isHeader || row.isSubHeader || isInfoRow;
+    const contractId = row.contractKey;
+    const shouldColor = !isStaticRow && contractId;
+
+    const makeColorMeta = (fieldKey) => {
+      if (!shouldColor) return null;
+      return {
+        contractId,
+        fieldKey,
+        dayHigh: row.highs?.[fieldKey] ?? null,
+        dayLow: row.lows?.[fieldKey] ?? null,
+      };
+    };
+
+    const isHeaderRow = row.isHeader;
+    const isFuturesRow = row.sectionType === 'futures' || (isMainTableRow && !isOptionRow);
+    const rowBorderClass = isHeaderRow
+      ? 'border-b border-transparent'
+      : `border-b ${isDarkMode ? 'border-slate-700/60' : 'border-slate-200/70'}`;
+    const rowClassName = `${rowBorderClass} last:border-0 ${hoverRow} transition-colors`;
+
+    return (
+      <tr
+        key={key}
+        className={rowClassName}
+        data-row-type={isFuturesRow ? 'futures' : undefined}
+      >
+        <td className={segmentCellClass}>
+          {isHeaderRow && isFullscreen && !isMainTableRow && row.badgeLabel ? (
+            // Header rows (strike price rows) in fullscreen mode for sections - show pills with ITM/ATM/OTM
+            <div className="flex items-center gap-2">
+              <span className={`segment-badge ${
+                row.badgeTone === 'call-itm' ? 'segment-badge-call-itm' :
+                row.badgeTone === 'call-atm' ? 'segment-badge-call-atm' :
+                row.badgeTone === 'call-otm' ? 'segment-badge-call-otm' :
+                row.badgeTone === 'put-itm' ? 'segment-badge-put-itm' :
+                row.badgeTone === 'put-atm' ? 'segment-badge-put-atm' :
+                row.badgeTone === 'put-otm' ? 'segment-badge-put-otm' :
+                row.sectionType === 'calls' ? 'segment-badge-call' :
+                row.sectionType === 'puts' ? 'segment-badge-put' :
+                'segment-badge-neutral'
+              }`}>
+                {row.badgeLabel}
+              </span>
+              <span className="truncate block max-w-[200px]">{row.segment}</span>
+            </div>
+          ) : isStaticRow ? (
+            <span className="truncate block max-w-[200px]">{row.segment}</span>
+          ) : isOptionRow ? (
+            <div className="flex flex-col gap-1">
+              {/* Section rows (above spot, below spot, dynamic strike) */}
+              {!isMainTableRow && row.badgeLabel && row.strikePrice != null ? (
+                <>
+                  {isFullscreen ? (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <span className={`segment-badge ${
+                          row.badgeTone === 'call-itm' ? 'segment-badge-call-itm' :
+                          row.badgeTone === 'call-atm' ? 'segment-badge-call-atm' :
+                          row.badgeTone === 'call-otm' ? 'segment-badge-call-otm' :
+                          row.badgeTone === 'put-itm' ? 'segment-badge-put-itm' :
+                          row.badgeTone === 'put-atm' ? 'segment-badge-put-atm' :
+                          row.badgeTone === 'put-otm' ? 'segment-badge-put-otm' :
+                          row.sectionType === 'calls' ? 'segment-badge-call' :
+                          row.sectionType === 'puts' ? 'segment-badge-put' :
+                          'segment-badge-neutral'
+                        }`}>
+                          {row.badgeLabel}
+                        </span>
+                        <span className="text-xs sm:text-sm">
+                          @ {Number(row.strikePrice).toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="truncate text-xs sm:text-sm opacity-80">
+                        {row.tradingsymbol || row.segment || '-'}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      {/* Main page: pill(call/put itm/atm/otm) at beginning of row */}
+                      <div className="flex items-center gap-2">
+                        <span className={`segment-badge ${
+                          row.badgeTone === 'call-itm' ? 'segment-badge-call-itm' :
+                          row.badgeTone === 'call-atm' ? 'segment-badge-call-atm' :
+                          row.badgeTone === 'call-otm' ? 'segment-badge-call-otm' :
+                          row.badgeTone === 'put-itm' ? 'segment-badge-put-itm' :
+                          row.badgeTone === 'put-atm' ? 'segment-badge-put-atm' :
+                          row.badgeTone === 'put-otm' ? 'segment-badge-put-otm' :
+                          row.sectionType === 'calls' ? 'segment-badge-call' :
+                          row.sectionType === 'puts' ? 'segment-badge-put' :
+                          'segment-badge-neutral'
+                        }`}>
+                          {row.badgeLabel}
+                        </span>
+                        <span className="text-xs sm:text-sm">
+                          @ {Number(row.strikePrice).toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="truncate text-xs sm:text-sm opacity-80">
+                        {row.tradingsymbol || row.segment || '-'}
+                      </div>
+                    </>
+                  )}
+                </>
+              ) : isMainTableRow && row.strikePrice != null ? (
+                <>
+                  {/* Main table rows (NIFTY DERIVATIVES) */}
+                  {isFullscreen ? (
+                    <>
+                      <div className="flex items-center gap-2">
+                        {row.sectionType === 'calls' && (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-yellow-500/20 text-yellow-600 dark:text-yellow-400 border border-yellow-500/30 whitespace-nowrap">
+                            CALL
+                          </span>
+                        )}
+                        {row.sectionType === 'puts' && (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/30 whitespace-nowrap">
+                            PUT
+                          </span>
+                        )}
+                        <span className="text-xs sm:text-sm">
+                          @ {Number(row.strikePrice).toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="truncate text-xs sm:text-sm opacity-80">
+                        {row.tradingsymbol || row.segment || '-'}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      {/* Main page: pill(call/put) @ strike price */}
+                      <div className="flex items-center gap-2">
+                        {row.sectionType === 'calls' && (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-yellow-500/20 text-yellow-600 dark:text-yellow-400 border border-yellow-500/30 whitespace-nowrap">
+                            CALL
+                          </span>
+                        )}
+                        {row.sectionType === 'puts' && (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/30 whitespace-nowrap">
+                            PUT
+                          </span>
+                        )}
+                        <span className="text-xs sm:text-sm">
+                          @ {Number(row.strikePrice).toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="truncate text-xs sm:text-sm opacity-80">
+                        {row.tradingsymbol || row.segment || '-'}
+                      </div>
+                    </>
+                  )}
+                </>
+              ) : (
+                <>
+                  {/* Fallback for rows without strike price */}
+                  {row.badgeLabel && (
+                    <span className={`segment-badge ${row.sectionType === 'calls' ? 'segment-badge-call' : row.sectionType === 'puts' ? 'segment-badge-put' : 'segment-badge-neutral'}`}>
+                      {row.badgeLabel}
+                    </span>
+                  )}
+                  <span className="truncate block max-w-[200px]">{row.segment}</span>
+                </>
+              )}
+            </div>
+          ) : (
+            <span className="truncate block max-w-[200px]">{row.segment}</span>
+          )}
+        </td>
+        <DataCell
+          value={isStaticRow ? null : (row.ltpRaw ?? null)}
+          className={`${mainTableNumericPadding} px-2 sm:px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis ${isStaticRow ? '' : 'font-semibold'}`}
+          displayValue={row.ltp}
+          coloringMeta={makeColorMeta('ltp')}
+        />
+        <DataCell
+          value={isStaticRow ? null : (row.oiRaw ?? null)}
+          className={`${mainTableNumericPadding} px-2 sm:px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis ${isStaticRow ? '' : 'font-semibold'}`}
+          displayValue={row.oi}
+          coloringMeta={makeColorMeta('oi')}
+        />
+        {(() => {
+          // Get delta OI for this row (evaluates OI and retrieves stored delta)
+          const hasContract = !isStaticRow && row.contractKey;
+          const hasOiValue = row.oiRaw !== null && row.oiRaw !== undefined;
+          
+          let deltaOi = null;
+          if (hasContract && hasOiValue) {
+            deltaOi = getDeltaOi(row.contractKey, row.oiRaw);
+          }
+          
+          // Show delta value if available, otherwise empty string (no placeholder)
+          const deltaOiDisplay = deltaOi !== null && deltaOi !== undefined
+            ? (deltaOi > 0 ? `+${formatInteger(deltaOi)}` : formatInteger(deltaOi))
+            : '';
+          
+          return (
+            <DataCell
+              value={isStaticRow ? null : (row.oiRaw ?? null)}
+              className={`${mainTableNumericPadding} px-2 sm:px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis`}
+              displayValue={deltaOiDisplay}
+              coloringMeta={!isStaticRow && row.contractKey ? makeColorMeta('oi') : null}
+            />
+          );
+        })()}
+        <DataCell
+          value={isStaticRow ? null : (row.volRaw ?? null)}
+          className={`${mainTableNumericPadding} px-2 sm:px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis ${isStaticRow ? '' : 'font-semibold'}`}
+          displayValue={row.vol}
+          coloringMeta={makeColorMeta('vol')}
+          title={!isStaticRow && row.originalVol != null ? `API Volume: ${Number(row.originalVol).toLocaleString()}` : null}
+        />
+        <DataCell
+          value={isStaticRow ? null : (row.bidRaw ?? null)}
+          className={`${mainTableNumericPadding} px-2 sm:px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis ${isStaticRow ? '' : 'font-semibold'}`}
+          displayValue={row.bid}
+          coloringMeta={makeColorMeta('bid')}
+        />
+        <DataCell
+          value={isStaticRow ? null : (row.askRaw ?? null)}
+          className={`${mainTableNumericPadding} px-2 sm:px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis ${isStaticRow ? '' : 'font-semibold'}`}
+          displayValue={row.ask}
+          coloringMeta={makeColorMeta('ask')}
+        />
+        <DataCell
+          value={isStaticRow ? null : (row.bidQtyRaw ?? null)}
+          className={`${mainTableNumericPadding} px-2 sm:px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis ${isStaticRow ? '' : 'font-semibold'}`}
+          displayValue={row.bidQty}
+          coloringMeta={makeColorMeta('bidQty')}
+        />
+        {(() => {
+          // Calculate ΔB/A QTY = bidQty - askQty
+          const bidQty = isStaticRow ? null : (row.bidQtyRaw ?? null);
+          const askQty = isStaticRow ? null : (row.askQtyRaw ?? null);
+          const deltaBA = bidQty !== null && askQty !== null && Number.isFinite(bidQty) && Number.isFinite(askQty)
+            ? bidQty - askQty
+            : null;
+          
+          const deltaBADisplay = deltaBA !== null && deltaBA !== undefined
+            ? (deltaBA > 0 ? `+${formatInteger(deltaBA)}` : formatInteger(deltaBA))
+            : '';
+          
+          return (
+            <DataCell
+              value={isStaticRow ? null : deltaBA}
+              className={`${mainTableNumericPadding} px-2 sm:px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis ${isStaticRow ? '' : 'font-semibold'}`}
+              displayValue={deltaBADisplay}
+              coloringMeta={makeColorMeta('deltaBA')}
+            />
+          );
+        })()}
+        <DataCell
+          value={isStaticRow ? null : (row.askQtyRaw ?? null)}
+          className={`${mainTableNumericPadding} px-2 sm:px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis ${isStaticRow ? '' : 'font-semibold'}`}
+          displayValue={row.askQty}
+          coloringMeta={makeColorMeta('askQty')}
+        />
+        <DataCell
+          value={isStaticRow ? null : (row.changeRaw ?? null)}
+          className={`${mainTableNumericPadding} px-2 sm:px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis`}
+          displayValue={row.change}
+          coloringMeta={makeColorMeta('change')}
+        />
+      </tr>
+    );
+  };
+
+  useEffect(() => {
+    if (spot != null) {
+      const previousSpot = previousSpotRef.current;
+      if (previousSpot !== null && Number.isFinite(previousSpot)) {
+        if (spot > previousSpot) setSpotTrend('up');
+        else if (spot < previousSpot) setSpotTrend('down');
+        // Maintain previous state if value is same
+      }
+      previousSpotRef.current = spot;
+    }
+  }, [spot]);
+
+  useEffect(() => {
+    if (summaryStats?.length) {
+      const volStat = summaryStats.find(stat => stat.key === 'futuresVol');
+      if (volStat && Number.isFinite(volStat.value)) {
+        const previousVol = previousVolumeRef.current;
+        if (previousVol !== null && Number.isFinite(previousVol)) {
+          if (volStat.value > previousVol) setVolumeTrend('up');
+          else if (volStat.value < previousVol) setVolumeTrend('down');
+          // Maintain previous state if value is same
+        }
+        previousVolumeRef.current = volStat.value;
+      }
+    }
+  }, [summaryStats]);
 
   const enterFullscreen = async () => {
     try {
@@ -47,255 +412,113 @@ export default function FuturesTable({ spot, baseSymbol, selectedContract, blink
     setIsFullscreen(false);
   };
 
-  // Listen for fullscreen changes
+  // Listen for fullscreen changes and restore state on mount
   useEffect(() => {
+    // Check if already in fullscreen on mount (e.g., after page reload)
+    const checkFullscreenState = () => {
+      const isCurrentlyFullscreen = !!(
+        document.fullscreenElement ||
+        document.webkitFullscreenElement ||
+        document.msFullscreenElement
+      );
+      if (isCurrentlyFullscreen && !isFullscreen) {
+        setIsFullscreen(true);
+      }
+    };
+
+    // Check immediately
+    checkFullscreenState();
+
     const handleFullscreenChange = () => {
       const isCurrentlyFullscreen = !!(
         document.fullscreenElement ||
         document.webkitFullscreenElement ||
         document.msFullscreenElement
       );
-      if (!isCurrentlyFullscreen) {
-        setIsFullscreen(false);
-      }
+      setIsFullscreen(isCurrentlyFullscreen);
     };
 
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
     document.addEventListener('msfullscreenchange', handleFullscreenChange);
 
+    // Also check on visibility change (when tab becomes visible again)
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        checkFullscreenState();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
       document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
       document.removeEventListener('msfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, []);
+  }, [isFullscreen]);
 
-  const organizedRows = useMemo(() => {
-    console.log('🔄 FuturesTable: organizedRows useMemo called with organizedData:', organizedData);
-    if (loading) return [{ segment: 'Loading...', ltp: '-', change: '-', oi: '-', vol: '-', bid: '-', bidQty: '-', indicator: 'loading' }];
-    if (!organizedData || organizedData.length === 0) return [{ segment: 'No data available', ltp: '-', change: '-', oi: '-', vol: '-', bid: '-', bidQty: '-', indicator: 'error' }];
-    
-    return organizedData;
-  }, [organizedData, loading]);
-
-  // Track starting values for each cell independently for price movement monitoring
-  useEffect(() => {
-    organizedRows.forEach((row, index) => {
-      if (row.isHeader || row.isSubHeader) return;
-      
-      const baseKey = row.instrumentToken || `${row.tradingsymbol || row.segment}-${index}`;
-      
-      // Track LTP
-      if (row.ltp && row.ltp !== '-' && row.ltp !== '—') {
-        const ltpKey = `${baseKey}-ltp`;
-        if (!startingValuesRef.current.has(ltpKey)) {
-          const numValue = Number(row.ltp);
-          if (!isNaN(numValue)) startingValuesRef.current.set(ltpKey, numValue);
-        }
-      }
-      
-      // Track OI
-      if (row.oi && row.oi !== '-' && row.oi !== '—') {
-        const oiKey = `${baseKey}-oi`;
-        if (!startingValuesRef.current.has(oiKey)) {
-          const numValue = Number(row.oi.replace(/,/g, ''));
-          if (!isNaN(numValue)) startingValuesRef.current.set(oiKey, numValue);
-        }
-      }
-      
-      // Track Volume
-      if (row.vol && row.vol !== '-' && row.vol !== '—') {
-        const volKey = `${baseKey}-vol`;
-        if (!startingValuesRef.current.has(volKey)) {
-          const numValue = Number(row.vol.replace(/,/g, ''));
-          if (!isNaN(numValue)) startingValuesRef.current.set(volKey, numValue);
-        }
-      }
-      
-      // Track Bid
-      if (row.bid && row.bid !== '-' && row.bid !== '—') {
-        const bidKey = `${baseKey}-bid`;
-        if (!startingValuesRef.current.has(bidKey)) {
-          const numValue = Number(row.bid);
-          if (!isNaN(numValue)) startingValuesRef.current.set(bidKey, numValue);
-        }
-      }
-      
-      // Track Ask
-      if (row.ask && row.ask !== '-' && row.ask !== '—') {
-        const askKey = `${baseKey}-ask`;
-        if (!startingValuesRef.current.has(askKey)) {
-          const numValue = Number(row.ask);
-          if (!isNaN(numValue)) startingValuesRef.current.set(askKey, numValue);
-        }
-      }
-      
-      // Track Bid Qty
-      if (row.bidQty && row.bidQty !== '-' && row.bidQty !== '—') {
-        const bidQtyKey = `${baseKey}-bidQty`;
-        if (!startingValuesRef.current.has(bidQtyKey)) {
-          const numValue = Number(row.bidQty);
-          if (!isNaN(numValue)) startingValuesRef.current.set(bidQtyKey, numValue);
-        }
-      }
-      
-      // Track Ask Qty
-      if (row.askQty && row.askQty !== '-' && row.askQty !== '—') {
-        const askQtyKey = `${baseKey}-askQty`;
-        if (!startingValuesRef.current.has(askQtyKey)) {
-          const numValue = Number(row.askQty);
-          if (!isNaN(numValue)) startingValuesRef.current.set(askQtyKey, numValue);
-        }
-      }
-      
-      // Track Change (Delta)
-      if (row.change && row.change !== '-' && row.change !== '—') {
-        const changeKey = `${baseKey}-change`;
-        if (!startingValuesRef.current.has(changeKey)) {
-          const numValue = Number(row.change);
-          if (!isNaN(numValue)) startingValuesRef.current.set(changeKey, numValue);
-        }
-      }
-      
-      // Track Change Percent
-      if (row.changePercent && row.changePercent !== '-' && row.changePercent !== '—') {
-        const changePercentKey = `${baseKey}-changePercent`;
-        if (!startingValuesRef.current.has(changePercentKey)) {
-          const numValue = Number(row.changePercent);
-          if (!isNaN(numValue)) startingValuesRef.current.set(changePercentKey, numValue);
-        }
-      }
-    });
-  }, [organizedRows]);
-
-  // Helper function to get color coding for LTP based on value
-  const getLTPColor = (ltp, isHeader, isSubHeader) => {
-    if (isHeader || isSubHeader) return 'text-gray-500';
-    if (!ltp || ltp === '-' || ltp === '—') return 'text-gray-400';
-    
-    const value = Number(ltp);
-    if (value > 0) return 'price-up';
-    return 'price-neutral';
-  };
-
-  // Helper function to get color coding for OI based on value
-  const getOIColor = (oi, isHeader, isSubHeader) => {
-    if (isHeader || isSubHeader) return 'text-gray-500';
-    if (!oi || oi === '-' || oi === '—') return 'text-gray-400';
-    
-    const value = Number(oi.replace(/,/g, ''));
-    if (value > 10000) return 'price-up'; // High OI
-    if (value > 5000) return 'price-neutral';
-    return 'price-down'; // Low OI
-  };
-
-  // Helper function to get color coding for Volume based on value
-  const getVolumeColor = (vol, isHeader, isSubHeader) => {
-    if (isHeader || isSubHeader) return 'text-gray-500';
-    if (!vol || vol === '-' || vol === '—') return 'text-gray-400';
-    
-    const value = Number(vol.replace(/,/g, ''));
-    if (value > 1000) return 'price-up'; // High volume
-    if (value > 100) return 'price-neutral';
-    return 'price-down'; // Low volume
-  };
-
-  // Helper function to get color coding for Bid based on LTP movement
-  const getBidColor = (bid, ltp, isHeader, isSubHeader) => {
-    if (isHeader || isSubHeader) return 'text-gray-500';
-    if (!bid || bid === '-' || bid === '—') return 'text-gray-400';
-    
-    const bidValue = Number(bid);
-    const ltpValue = Number(ltp);
-    
-    if (ltpValue > bidValue) return 'price-up'; // LTP above bid (bullish)
-    if (ltpValue < bidValue) return 'price-down'; // LTP below bid (bearish)
-    return 'price-neutral'; // LTP at bid
-  };
-
-  // Helper function to get color coding for Ask based on LTP movement
-  const getAskColor = (ask, ltp, isHeader, isSubHeader) => {
-    if (isHeader || isSubHeader) return 'text-gray-500';
-    if (!ask || ask === '-' || ask === '—') return 'text-gray-400';
-    
-    const askValue = Number(ask);
-    const ltpValue = Number(ltp);
-    
-    if (ltpValue > askValue) return 'price-up'; // LTP above ask (very bullish)
-    if (ltpValue < askValue) return 'price-down'; // LTP below ask (bearish)
-    return 'price-neutral'; // LTP at ask
-  };
-
-  // Helper function to get color coding for Bid Qty based on LTP movement
-  const getBidQtyColor = (bidQty, ltp, isHeader, isSubHeader) => {
-    if (isHeader || isSubHeader) return 'text-gray-500';
-    if (!bidQty || bidQty === '-' || bidQty === '—') return 'text-gray-400';
-    
-    const bidQtyValue = Number(bidQty.replace(/,/g, ''));
-    const ltpValue = Number(ltp);
-    
-    // High bid qty when LTP is above bid (bullish pressure)
-    if (ltpValue > 0 && bidQtyValue > 1000) return 'price-up';
-    if (bidQtyValue > 100) return 'price-neutral';
-    return 'price-down'; // Low bid qty
-  };
-
-  // Helper function to get color coding for Ask Qty based on LTP movement
-  const getAskQtyColor = (askQty, ltp, isHeader, isSubHeader) => {
-    if (isHeader || isSubHeader) return 'text-gray-500';
-    if (!askQty || askQty === '-' || askQty === '—') return 'text-gray-400';
-    
-    const askQtyValue = Number(askQty.replace(/,/g, ''));
-    const ltpValue = Number(ltp);
-    
-    // High ask qty when LTP is below ask (bearish pressure)
-    if (ltpValue > 0 && askQtyValue > 1000) return 'price-up';
-    if (askQtyValue > 100) return 'price-neutral';
-    return 'price-down'; // Low ask qty
-  };
-
-  const getIndicatorIcon = (indicator, isBlinking) => {
-    if (indicator === 'header' || indicator === 'subheader') return '';
-    if (indicator === 'loading') return '⏳';
-    if (indicator === 'error') return '❌';
-    
-    const icon = indicator === 'up' ? '▲' : indicator === 'down' ? '▼' : '●';
-    const color = indicator === 'up' ? 'text-green-500' : indicator === 'down' ? 'text-red-500' : 'text-gray-400';
-    const blinkClass = (isBlinking && blinkEnabled) ? 'strike-alert indicator-pulse' : '';
-    
-    return (
-      <span className={`${color} ${blinkClass} font-bold text-lg`} title={isBlinking && blinkEnabled ? 'Price below strike - Alert!' : ''}>
-{icon}
-      </span>
-    );
-  };
+  const organizedRows = organizedData && organizedData.length > 0
+    ? organizedData
+    : [{ segment: 'No data available', ltp: '-', change: '-', oi: '-', vol: '-', bid: '-', bidQty: '-', ask: '-', askQty: '-' }];
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-      <div className="bg-white px-6 py-4 border-b border-gray-200">
+    <div className={`rounded-xl border shadow-sm overflow-hidden ${cardBase} ${
+      !isFullscreen && !isDarkMode ? 'table-halo-border-strong' : ''
+    }`}>
+      <div
+        className={`px-4 sm:px-6 py-4 border-b ${
+          isDarkMode ? 'bg-slate-800 border-slate-600' : 'bg-white border-gray-200'
+        }`}
+      >
         <div className="flex justify-between items-center">
           <div>
-            <h3 className="font-bold text-lg text-gray-900">
-              NIFTY DERIVATIVES
-              {selectedContract && (
-                <span className="text-sm font-normal text-gray-600 ml-2">
-                  - {selectedContract.tradingsymbol || selectedContract.instrumentToken}
+            <h3 className={`font-semibold text-base tracking-wide flex items-center gap-3`}>
+              <span className={isDarkMode ? 'text-slate-300' : 'bg-gradient-to-r from-blue-500 to-purple-500 bg-clip-text text-transparent'}>
+                NIFTY DERIVATIVES
+                {selectedContract && (
+                  <span className={`text-sm font-normal ml-2 ${isDarkMode ? 'text-slate-400' : 'text-gray-400'}`}>
+                    - {selectedContract.tradingsymbol || selectedContract.instrumentToken}
+                  </span>
+                )}
+              </span>
+              {marketTrend && (
+                <span className={`text-xs font-medium px-2.5 py-1 rounded-full transition-all duration-300 ${
+                  marketTrend.classification === 'Bullish' 
+                    ? 'bg-green-500/20 text-green-600 dark:text-green-400 border border-green-500/30' 
+                    : marketTrend.classification === 'Bearish'
+                    ? 'bg-red-500/20 text-red-600 dark:text-red-400 border border-red-500/30'
+                    : 'bg-gray-500/20 text-gray-600 dark:text-gray-400 border border-gray-500/30'
+                }`}>
+                  <span className={`inline-block w-2 h-2 rounded-full mr-1.5 align-middle ${
+                    marketTrend.classification === 'Bullish' 
+                      ? 'bg-green-500' 
+                      : marketTrend.classification === 'Bearish'
+                      ? 'bg-red-500'
+                      : 'bg-gray-500'
+                  }`}></span>
+                  {marketTrend.classification} {marketTrend.score != null ? `(${marketTrend.score > 0 ? '+' : ''}${marketTrend.score.toFixed(1)})` : ''}
                 </span>
               )}
             </h3>
           </div>
           <div className="flex items-center gap-4">
           {summaryStats.length > 0 && (
-            <div className="flex flex-wrap items-center gap-4 text-xs sm:text-sm text-gray-900 dark:text-gray-100">
+            <div className={`flex flex-wrap items-center gap-4 text-xs sm:text-sm ${summaryTextColor}`}>
               {summaryStats.map(stat => {
                 if (stat.value === null || stat.value === undefined || stat.value === '') {
                   return null;
                 }
                 const displayValue = stat.format ? stat.format(stat.value) : formatNumber(stat.value);
+                const showTrendIcon = stat.key === 'spot' || stat.key === 'futuresVol';
+                const trendDirection = stat.key === 'spot' ? spotTrend : stat.key === 'futuresVol' ? volumeTrend : null;
                 return (
                   <div key={stat.key} className="flex items-center gap-2">
-                    <span className={`w-2 h-2 rounded-full ${stat.color || 'bg-gray-400'}`}></span>
+                    {showTrendIcon ? (
+                      <TrendIcon direction={trendDirection || 'flat'} />
+                    ) : (
+                      <span className={`w-2 h-2 rounded-full ${stat.color || 'bg-gray-400'}`}></span>
+                    )}
                     <span className="font-semibold">{stat.label}: {displayValue}</span>
                   </div>
                 );
@@ -304,7 +527,7 @@ export default function FuturesTable({ spot, baseSymbol, selectedContract, blink
           )}
             <button
               onClick={enterFullscreen}
-              className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-200 rounded-lg transition-colors"
+              className={`${buttonClasses} rounded-lg transition-colors`}
               title="View fullscreen"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -314,238 +537,263 @@ export default function FuturesTable({ spot, baseSymbol, selectedContract, blink
           </div>
         </div>
       </div>
-      <div className="overflow-x-auto">
-      <table className="min-w-[720px] w-full text-sm table-fixed">
+      <div>
+      <table className="w-full text-xs sm:text-sm table-fixed">
         <colgroup>
-          <col className="w-56" />
-          <col className="w-24" />
-          <col className="w-24" />
-          <col className="w-20" />
-          <col className="w-24" />
-          <col className="w-24" />
-          <col className="w-24" />
-          <col className="w-24" />
-          <col className="w-24" />
-          <col className="w-24" />
+          <col style={{ width: '18%' }} />
+          <col style={{ width: '8%' }} />
+          <col style={{ width: '8%' }} />
+          <col style={{ width: '7%' }} />
+          <col style={{ width: '8%' }} />
+          <col style={{ width: '8%' }} />
+          <col style={{ width: '8%' }} />
+          <col style={{ width: '8%' }} />
+          <col style={{ width: '7%' }} />
+          <col style={{ width: '8%' }} />
+          <col style={{ width: '8%' }} />
         </colgroup>
-        <thead className="bg-gray-50 text-gray-600 text-xs font-semibold uppercase tracking-wide">
+        <thead
+          className={`text-xs font-semibold uppercase tracking-wide ${
+            isDarkMode ? 'bg-slate-800 text-slate-200' : 'bg-gray-50 text-gray-600'
+          }`}
+        >
           <tr>
-            <th className="text-left px-4 py-3">Segment</th>
-            <th className="px-4 py-3 text-right">LTP</th>
-            <th className="px-4 py-3 text-right">Δ Price</th>
-            <th className="px-4 py-3 text-right">%Δ</th>
-            <th className="px-4 py-3 text-right">OI</th>
-            <th className="px-4 py-3 text-right">Vol</th>
-            <th className="px-4 py-3 text-right">Bid</th>
-            <th className="px-4 py-3 text-right">Ask</th>
-            <th className="px-4 py-3 text-right">Bid Qty</th>
-            <th className="px-4 py-3 text-right">Ask Qty</th>
+            <th className="text-left px-3 sm:px-4 py-3">Segment</th>
+            <th className="px-3 sm:px-4 py-3 text-right">LTP</th>
+            <th className="px-3 sm:px-4 py-3 text-right">OI</th>
+            <th className="px-3 sm:px-4 py-3 text-right">Δ OI</th>
+            <th className="px-3 sm:px-4 py-3 text-right">Vol</th>
+            <th className="px-3 sm:px-4 py-3 text-right">Bid</th>
+            <th className="px-3 sm:px-4 py-3 text-right">Ask</th>
+            <th className="px-3 sm:px-4 py-3 text-right">Bid Qty</th>
+            <th className="px-3 sm:px-4 py-3 text-right">ΔB/A QTY</th>
+            <th className="px-3 sm:px-4 py-3 text-right">Ask Qty</th>
+            <th className="px-3 sm:px-4 py-3 text-right">Δ Price</th>
           </tr>
         </thead>
         <tbody>
-          {organizedRows.map((row, i) => {
-            const baseKey = row.instrumentToken || `${row.tradingsymbol || row.segment}-${i}`;
-            const numericCellBase = 'py-3 px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell';
-            
-            return (
-            <tr 
-              key={i} 
-              className={`border-b last:border-0 hover:bg-blue-50 ${
-                row.isHeader ? 'section-header' : 
-                row.isSubHeader ? 'section-subheader' : 
-                row.sectionType === 'futures' ? 'futures-section' :
-                row.sectionType === 'calls' ? 'calls-section' :
-                row.sectionType === 'puts' ? 'puts-section' : ''
-              }`}
-            >
-              <td className={`py-3 px-4 whitespace-nowrap ${
-                row.isHeader ? 'text-lg font-bold text-white' : 
-                row.isSubHeader ? 'text-sm pl-6 font-semibold text-white' : 
-                'pl-8'
-              }`}>
-                {row.segment}
-              </td>
-              <td className={`${numericCellBase} ${
-                getPriceTrackingClass(row.ltp, startingValuesRef.current.get(`${baseKey}-ltp`), row.isHeader || row.isSubHeader)
-              } ${getLTPColor(row.ltp, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
-                {row.ltp}
-              </td>
-                <td className={`${numericCellBase} ${
-                  getPriceTrackingClass(row.change ? Number(row.change) : 0, startingValuesRef.current.get(`${baseKey}-change`), row.isHeader || row.isSubHeader)
-                } ${row.isHeader || row.isSubHeader ? 'text-gray-500' :
-                  Number(row.change) > 0 ? 'price-up' : 
-                  Number(row.change) < 0 ? 'price-down' : 'price-neutral'
-                } ${animateEnabled && !row.isHeader && !row.isSubHeader ? 
-                  (Number(row.change) > 0 ? 'delta-animate-up' : 
-                   Number(row.change) < 0 ? 'delta-animate-down' : '') : ''}`}>
-                  {row.change}
-                </td>
-                <td className={`${numericCellBase} ${
-                  getPriceTrackingClass(row.changePercent ? Number(row.changePercent) : 0, startingValuesRef.current.get(`${baseKey}-changePercent`), row.isHeader || row.isSubHeader)
-                } ${row.isHeader || row.isSubHeader ? 'text-gray-500' :
-                  Number(row.changePercent) > 0 ? 'price-up' : 
-                  Number(row.changePercent) < 0 ? 'price-down' : 'price-neutral'
-                }`}>
-                  {row.changePercent ? `${row.changePercent}%` : '—'}
-                </td>
-              <td className={`${numericCellBase} ${
-                getPriceTrackingClass(row.oi ? Number(row.oi.replace(/,/g, '')) : 0, startingValuesRef.current.get(`${baseKey}-oi`), row.isHeader || row.isSubHeader)
-              } ${getOIColor(row.oi, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
-                {row.oi}
-              </td>
-              <td className={`${numericCellBase} ${
-                getPriceTrackingClass(row.vol ? Number(row.vol.replace(/,/g, '')) : 0, startingValuesRef.current.get(`${baseKey}-vol`), row.isHeader || row.isSubHeader)
-              } ${getVolumeColor(row.vol, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
-                {row.vol}
-              </td>
-              <td className={`${numericCellBase} ${
-                getPriceTrackingClass(row.bid ? Number(row.bid) : 0, startingValuesRef.current.get(`${baseKey}-bid`), row.isHeader || row.isSubHeader)
-              } ${getBidColor(row.bid, row.ltp, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
-                {row.bid}
-              </td>
-              <td className={`${numericCellBase} ${
-                getPriceTrackingClass(row.ask ? Number(row.ask) : 0, startingValuesRef.current.get(`${baseKey}-ask`), row.isHeader || row.isSubHeader)
-              } ${getAskColor(row.ask, row.ltp, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
-                {row.ask}
-              </td>
-              <td className={`${numericCellBase} ${
-                getPriceTrackingClass(row.bidQty ? Number(row.bidQty) : 0, startingValuesRef.current.get(`${baseKey}-bidQty`), row.isHeader || row.isSubHeader)
-              } ${getBidQtyColor(row.bidQty, row.ltp, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
-                {row.bidQty || '-'}
-              </td>
-              <td className={`${numericCellBase} ${
-                getPriceTrackingClass(row.askQty ? Number(row.askQty) : 0, startingValuesRef.current.get(`${baseKey}-askQty`), row.isHeader || row.isSubHeader)
-              } ${getAskQtyColor(row.askQty, row.ltp, row.isHeader, row.isSubHeader)} ${row.isHeader || row.isSubHeader ? '' : 'font-semibold'}`}>
-                {row.askQty || '-'}
-              </td>
-            </tr>
-            );
-          })}
+          {organizedRows.map((row, i) => renderRow(row, `main-${i}`))}
+          {fullscreenSections.map(
+            (section, sectionIndex) =>
+              isFullscreen && (
+                <React.Fragment key={`section-${sectionIndex}`}>
+                  <tr
+                    className={`border-t ${
+                      isDarkMode ? 'border-slate-700 bg-slate-800/60' : 'border-slate-200 bg-slate-100/70'
+                    }`}
+                  >
+                    <td
+                      colSpan={10}
+                      className={`px-8 py-4 text-xs font-semibold uppercase tracking-wide flex flex-col gap-2 ${
+                        isDarkMode ? 'text-slate-300' : 'text-gray-600'
+                      }`}
+                    >
+                      <div className="flex items-center justify-center gap-2">
+                        {section.sectionType === 'calls' && (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-yellow-500/20 text-yellow-600 dark:text-yellow-400 border border-yellow-500/30">
+                            CALL
+                          </span>
+                        )}
+                        {section.sectionType === 'puts' && (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/30">
+                            PUT
+                          </span>
+                        )}
+                        <span>{section.title}</span>
+                      </div>
+                      {section.headerSlot && (
+                        <div
+                          className={`text-left text-[11px] sm:text-xs font-normal ${
+                            isDarkMode ? 'text-slate-400' : 'text-gray-500'
+                          }`}
+                        >
+                          {section.headerSlot}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                  {section.rows
+                    .filter(row => !row.isHeader) // Remove "Strike: <value>" header rows from main page
+                    .map((row, rowIndex) => renderRow(row, `section-${sectionIndex}-${rowIndex}`))}
+                </React.Fragment>
+              )
+          )}
         </tbody>
       </table>
       </div>
       
       {/* Professional Edge-to-Edge Fullscreen Overlay */}
       {isFullscreen && (
-        <div className="fixed inset-0 z-50 bg-white dark:bg-slate-900 flex flex-col">
+        <div
+          className={`fullscreen-container fixed inset-0 z-50 flex flex-col w-screen ${
+            isDarkMode ? 'bg-slate-950 text-slate-100' : 'bg-white text-gray-900'
+          }`}
+          style={{ height: 'var(--real-vh, 100vh)', width: '100vw', maxHeight: 'var(--real-vh, 100vh)', maxWidth: '100vw' }}
+        >
           {/* Professional Header - Edge to Edge */}
-          <div className="bg-gradient-to-r from-slate-800 to-slate-900 dark:from-slate-900 dark:to-black px-8 py-6 shadow-lg">
-            <div className="flex justify-between items-center">
-              <div className="flex items-center space-x-6">
-                <div>
-                  <h1 className="font-bold text-3xl text-white">
-                    NIFTY DERIVATIVES
-                  </h1>
-                  {selectedContract && (
-                    <p className="text-lg text-slate-300 mt-1">
-                      {selectedContract.tradingsymbol || selectedContract.instrumentToken}
-                    </p>
-                  )}
-                </div>
-                {spot && (
-                  <div className="flex items-center space-x-8 text-lg">
-                    <div className="flex items-center space-x-3 bg-slate-700 px-4 py-2 rounded-lg">
-                      <span className="w-3 h-3 bg-green-400 rounded-full"></span>
-                      <span className="font-semibold text-white">Spot: ₹{spot}</span>
-                    </div>
-                  </div>
+          <div className={`flex-shrink-0 ${
+            isDarkMode 
+              ? 'bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white' 
+              : 'bg-gradient-to-r from-blue-50 via-purple-50 to-blue-50 text-gray-900 border-b border-gray-200'
+          } shadow-lg`}>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 relative">
+              <div className="flex items-center gap-3">
+                <h1 className={`font-bold ${
+                  isDarkMode 
+                    ? 'text-white' 
+                    : 'bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent'
+                }`}>
+                  NIFTY DERIVATIVES
+                </h1>
+                {selectedContract && (
+                  <p className={`text-lg ${isDarkMode ? 'text-slate-300' : 'text-gray-600'}`}>
+                    {selectedContract.tradingsymbol || selectedContract.instrumentToken}
+                  </p>
+                )}
+                {marketTrend && (
+                  <span className={`text-sm font-medium px-3 py-1.5 rounded-full transition-all duration-300 ${
+                    marketTrend.classification === 'Bullish' 
+                      ? isDarkMode
+                        ? 'bg-green-500/20 text-green-300 border border-green-500/40'
+                        : 'bg-green-500/10 text-green-600 border border-green-500/30'
+                      : marketTrend.classification === 'Bearish'
+                      ? isDarkMode
+                        ? 'bg-red-500/20 text-red-300 border border-red-500/40'
+                        : 'bg-red-500/10 text-red-600 border border-red-500/30'
+                      : isDarkMode
+                      ? 'bg-gray-500/20 text-gray-300 border border-gray-500/40'
+                      : 'bg-gray-500/10 text-gray-600 border border-gray-500/30'
+                  }`}>
+                    <span className={`inline-block w-2 h-2 rounded-full mr-2 align-middle ${
+                      marketTrend.classification === 'Bullish' 
+                        ? 'bg-green-400' 
+                        : marketTrend.classification === 'Bearish'
+                        ? 'bg-red-400'
+                        : 'bg-gray-400'
+                    }`}></span>
+                    {marketTrend.classification} {marketTrend.score != null ? `(${marketTrend.score > 0 ? '+' : ''}${marketTrend.score.toFixed(1)})` : ''}
+                  </span>
                 )}
               </div>
-              <button
-                onClick={exitFullscreen}
-                className="p-4 text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg transition-all duration-200 group"
-                title="Exit fullscreen (Press ESC)"
-              >
-                <svg className="w-8 h-8 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+              <div className="flex items-center gap-3">
+                {spot && (
+                  <>
+                    <span className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-semibold ${
+                      isDarkMode ? 'text-green-300' : 'text-gray-700'
+                    }`}>
+                      <TrendIcon direction={spotTrend} />
+                      Spot: ₹{spot ?? '—'}
+                    </span>
+                    {summaryStats?.length > 0 && (
+                      <span className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-semibold ${
+                        isDarkMode ? 'text-indigo-200' : 'text-gray-700'
+                      }`}>
+                        <TrendIcon direction={volumeTrend} />
+                        Vol: {formatNumber(summaryStats.find(stat => stat.key === 'futuresVol')?.value)}
+                      </span>
+                    )}
+                  </>
+                )}
+                <button
+                  onClick={exitFullscreen}
+                  className={`p-4 rounded-lg transition-all duration-200 group ${
+                    isDarkMode
+                      ? 'text-slate-300 hover:text-white hover:bg-slate-700'
+                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200'
+                  }`}
+                  title="Exit fullscreen (Press ESC)"
+                >
+                  <svg className="w-8 h-8 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
             </div>
+            {isFullscreen && connectionWarning && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="flex items-center gap-3 px-4 py-2 bg-red-600/95 text-white rounded-full shadow-lg animate-pulse">
+                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                  </svg>
+                  <span className="text-sm font-semibold uppercase tracking-wide">Live feed interrupted</span>
+                </div>
+              </div>
+            )}
           </div>
           
           {/* Professional Table - Edge to Edge */}
-          <div className="flex-1 overflow-hidden">
-            <div className="h-full overflow-auto">
-              <table className="w-full text-lg">
-                <thead className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-sm font-bold sticky top-0 shadow-sm">
-                  <tr>
-                    <th className="text-left px-8 py-6 border-r border-slate-200 dark:border-slate-600">Segment</th>
-                    <th className="px-8 py-6 border-r border-slate-200 dark:border-slate-600">LTP</th>
-                    <th className="px-8 py-6 border-r border-slate-200 dark:border-slate-600">Δ Price</th>
-                    <th className="px-8 py-6 border-r border-slate-200 dark:border-slate-600">%Δ</th>
-                    <th className="px-8 py-6 border-r border-slate-200 dark:border-slate-600">OI</th>
-                    <th className="px-8 py-6 border-r border-slate-200 dark:border-slate-600">Vol</th>
-                    <th className="px-8 py-6 border-r border-slate-200 dark:border-slate-600">Bid/Ask</th>
-                    <th className="px-8 py-6 border-r border-slate-200 dark:border-slate-600">Bid Qty/Ask Qty</th>
-                    <th className="text-center px-8 py-6">Indicator</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white dark:bg-slate-900">
-                  {organizedRows.map((row, i) => (
-                    <tr 
-                      key={i} 
-                      className={`border-b border-slate-200 dark:border-slate-700 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors ${
-                        row.isHeader ? 'section-header' : 
-                        row.isSubHeader ? 'section-subheader' :
-                        row.sectionType === 'futures' ? 'futures-section' :
-                        row.sectionType === 'calls' ? 'calls-section' :
-                        row.sectionType === 'puts' ? 'puts-section' : ''
+          <div className="table-wrapper">
+            <table className="fullscreen-table w-full table-fixed">
+              <colgroup>
+                <col style={{ width: '12%' }} />
+                <col style={{ width: '9.25%' }} />
+                <col style={{ width: '9.25%' }} />
+                <col style={{ width: '7%' }} />
+                <col style={{ width: '9.25%' }} />
+                <col style={{ width: '9.25%' }} />
+                <col style={{ width: '9.25%' }} />
+                <col style={{ width: '9.25%' }} />
+                <col style={{ width: '7%' }} />
+                <col style={{ width: '9.25%' }} />
+                <col style={{ width: '9.25%' }} />
+              </colgroup>
+              <thead
+                className={`font-semibold ${
+                  isDarkMode ? 'bg-slate-800 text-slate-200' : 'bg-slate-100 text-slate-700'
+                }`}
+              >
+                <tr>
+                  <th className={`text-left border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}>Segment</th>
+                  <th className={`text-right border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}>LTP</th>
+                  <th className={`text-right border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}>OI</th>
+                  <th className={`text-right border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}>Δ OI</th>
+                  <th className={`text-right border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}>Vol</th>
+                  <th className={`text-right border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}>Bid</th>
+                  <th className={`text-right border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}>Ask</th>
+                  <th className={`text-right border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}>Bid Qty</th>
+                  <th className={`text-right border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}>ΔB/A QTY</th>
+                  <th className={`text-right border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}>Ask Qty</th>
+                  <th className="text-right">Δ Price</th>
+                </tr>
+              </thead>
+              <tbody className={isDarkMode ? 'bg-slate-900' : 'bg-white'}>
+                {organizedRows.map((row, i) => renderRow(row, `fullscreen-main-${i}`))}
+                {fullscreenSections.map((section, sectionIndex) => (
+                  <React.Fragment key={`fullscreen-section-${sectionIndex}`}>
+                    <tr
+                      className={`border-t ${
+                        isDarkMode ? 'border-slate-700 bg-slate-800/70' : 'border-slate-200 bg-slate-100/80'
                       }`}
                     >
-                      <td className={`py-6 px-8 font-bold text-lg border-r border-slate-200 dark:border-slate-700 ${
-                        row.isHeader || row.isSubHeader ? 'text-white' : 'text-slate-900 dark:text-slate-100'
-                      }`}>
-                        {row.segment}
+                      <td
+                        colSpan={10}
+                        className={`font-semibold uppercase tracking-wide ${
+                          isDarkMode ? 'text-slate-300' : 'text-slate-600'
+                        }`}
+                      >
+                        <div className="flex flex-col gap-2">
+                          <div className="flex items-center justify-center gap-2">
+                            <span>{section.title}</span>
+                          </div>
+                          {section.headerSlot && (
+                            <div
+                              className={`text-left text-[11px] sm:text-xs font-normal ${
+                                isDarkMode ? 'text-slate-400' : 'text-slate-500'
+                              }`}
+                            >
+                              {section.headerSlot}
+                            </div>
+                          )}
+                        </div>
                       </td>
-                      <td className={`py-6 px-8 data-cell text-lg font-semibold border-r border-slate-200 dark:border-slate-700 ${
-                        row.isHeader || row.isSubHeader ? 'text-white' : 'text-slate-900 dark:text-slate-100'
-                      }`}>
-                        {row.ltp}
-                      </td>
-                      <td className={`py-6 px-8 data-cell text-lg font-bold border-r border-slate-200 dark:border-slate-700 ${
-                        row.isHeader || row.isSubHeader ? 'text-white' : 
-                        Number(row.change) > 0 ? 'price-up' : 
-                        Number(row.change) < 0 ? 'price-down' : 'text-slate-600 dark:text-slate-400'
-                      }`}>
-                {row.change}
-              </td>
-                      <td className={`py-6 px-8 data-cell text-lg font-bold border-r border-slate-200 dark:border-slate-700 ${
-                        row.isHeader || row.isSubHeader ? 'text-white' : 
-                        Number(row.changePercent) > 0 ? 'price-up' : 
-                        Number(row.changePercent) < 0 ? 'price-down' : 'text-slate-600 dark:text-slate-400'
-                      }`}>
-                        {row.changePercent ? `${row.changePercent}%` : '—'}
-                      </td>
-                      <td className={`py-6 px-8 data-cell text-lg font-semibold border-r border-slate-200 dark:border-slate-700 ${
-                        row.isHeader || row.isSubHeader ? 'text-white' : 'text-slate-900 dark:text-slate-100'
-                      }`}>
-                        {row.oi}
-                      </td>
-                      <td className={`py-6 px-8 data-cell text-lg font-semibold border-r border-slate-200 dark:border-slate-700 ${
-                        row.isHeader || row.isSubHeader ? 'text-white' : 'text-slate-900 dark:text-slate-100'
-                      }`}>
-                        {row.vol}
-                      </td>
-                      <td className={`py-6 px-8 data-cell text-lg font-semibold border-r border-slate-200 dark:border-slate-700 ${
-                        row.isHeader || row.isSubHeader ? 'text-white' : 'text-slate-900 dark:text-slate-100'
-                      }`}>
-                        {row.bid}
-                      </td>
-                      <td className={`py-6 px-8 data-cell text-lg font-semibold border-r border-slate-200 dark:border-slate-700 ${
-                        row.isHeader || row.isSubHeader ? 'text-white' : 'text-slate-900 dark:text-slate-100'
-                      }`}>
-                        {row.bidQty || '-'}
-                      </td>
-                      <td className="py-6 px-8 text-center">
-                        <span className="text-3xl">
-                          {getIndicatorIcon(row.indicator, row.isBlinking)}
-                        </span>
-                      </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-            </div>
+                    </tr>
+                    {section.rows
+                      .filter(row => !row.isHeader) // Remove "Strike: <value>" header rows in fullscreen mode
+                      .map((row, rowIndex) => renderRow(row, `fullscreen-section-${sectionIndex}-${rowIndex}`))}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

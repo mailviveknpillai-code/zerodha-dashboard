@@ -3,35 +3,56 @@ package com.zerodha.dashboard.web;
 import com.zerodha.dashboard.adapter.BreezeApiAdapter;
 import com.zerodha.dashboard.adapter.ZerodhaApiAdapter;
 import com.zerodha.dashboard.model.DerivativesChain;
+import com.zerodha.dashboard.service.LatestSnapshotCacheService;
 import com.zerodha.dashboard.service.MockDataService;
 import com.zerodha.dashboard.service.ZerodhaSessionService;
+import com.zerodha.dashboard.service.DynamicCacheUpdateScheduler;
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.StringUtils;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.regex.Pattern;
 
 /**
  * Controller for real derivatives data using Breeze API (primary) and Zerodha Kite API stopping
  */
 @RestController
 @RequestMapping("/api")
+@Validated
 public class RealDerivativesController {
+    private static final Pattern UNDERLYING_PATTERN = Pattern.compile("^[A-Z0-9_-]{1,15}$");
+    private static final Map<String, String> SEGMENT_ALIASES = Map.of(
+            "FUTURES", "FUTURES",
+            "CALL_OPTIONS", "CALL_OPTIONS",
+            "CALLS", "CALL_OPTIONS",
+            "PUT_OPTIONS", "PUT_OPTIONS",
+            "PUTS", "PUT_OPTIONS"
+    );
+
     private final Logger log = LoggerFactory.getLogger(RealDerivativesController.class);
     private final BreezeApiAdapter breezeApiAdapter;
     private final ZerodhaApiAdapter zerodhaApiAdapter;
     private final MockDataService mockDataService;
     private final ZerodhaSessionService zerodhaSessionService;
+    private final LatestSnapshotCacheService latestSnapshotCacheService;
+    private final DynamicCacheUpdateScheduler dynamicCacheUpdateScheduler;
+    
+    // Executor service for async cache updates (non-blocking)
+    private final ExecutorService cacheUpdateExecutor = Executors.newFixedThreadPool(2);
     
     @Value("${breeze.api.enabled:true}")
     private boolean breezeApiEnabled;
@@ -45,11 +66,15 @@ public class RealDerivativesController {
     public RealDerivativesController(BreezeApiAdapter breezeApiAdapter,
                                      ZerodhaApiAdapter zerodhaApiAdapter,
                                      MockDataService mockDataService,
-                                     ZerodhaSessionService zerodhaSessionService) {
+                                     ZerodhaSessionService zerodhaSessionService,
+                                     LatestSnapshotCacheService latestSnapshotCacheService,
+                                     DynamicCacheUpdateScheduler dynamicCacheUpdateScheduler) {
         this.breezeApiAdapter = breezeApiAdapter;
         this.zerodhaApiAdapter = zerodhaApiAdapter;
         this.mockDataService = mockDataService;
         this.zerodhaSessionService = zerodhaSessionService;
+        this.latestSnapshotCacheService = latestSnapshotCacheService;
+        this.dynamicCacheUpdateScheduler = dynamicCacheUpdateScheduler;
     }
 
     /**
@@ -60,12 +85,10 @@ public class RealDerivativesController {
     public ResponseEntity<?> getRealDerivativesChain(@RequestParam(value = "underlying", defaultValue = "NIFTY") String underlying) {
         log.info("real-derivatives request received for underlying='{}'", underlying);
 
-        if (!StringUtils.hasText(underlying)) {
-            log.warn("real-derivatives called with empty underlying");
-            return ResponseEntity.badRequest().body("underlying query parameter is required");
+        String normalizedUnderlying = sanitizeUnderlying(underlying);
+        if (normalizedUnderlying == null) {
+            return validationError("underlying", "Underlying must be 1-15 characters (A-Z, 0-9, hyphen or underscore)");
         }
-
-        String normalizedUnderlying = URLDecoder.decode(underlying, StandardCharsets.UTF_8).trim().toUpperCase();
         log.info("real-derivatives normalized underlying='{}'", normalizedUnderlying);
 
         try {
@@ -97,7 +120,7 @@ public class RealDerivativesController {
             }
             
             // Fallback to Breeze API if Zerodha is disabled or failed
-            if (!derivativesChain.isPresent() && breezeApiEnabled && !zerodhaEnabled) {
+            if (derivativesChain.isEmpty() && breezeApiEnabled && !zerodhaEnabled) {
                 log.info("Fetching data from Breeze API");
                 derivativesChain = breezeApiAdapter.getDerivativesChain(normalizedUnderlying);
                 if (derivativesChain.isPresent()) {
@@ -109,7 +132,7 @@ public class RealDerivativesController {
             }
             
             // Mock data ONLY if both APIs are disabled (never when Zerodha is enabled)
-            if (!derivativesChain.isPresent() && mockDataEnabled && !zerodhaEnabled) {
+            if (derivativesChain.isEmpty() && mockDataEnabled && !zerodhaEnabled) {
                 log.info("Using mock data for UI testing (Zerodha is disabled)");
                 derivativesChain = Optional.of(mockDataService.generateMockDerivativesChain());
                 dataSource = "MOCK_DATA";
@@ -117,9 +140,12 @@ public class RealDerivativesController {
             }
             
             if (derivativesChain.isPresent()) {
+                DerivativesChain chain = derivativesChain.get();
+                // Update cache atomically with the latest snapshot
+                latestSnapshotCacheService.updateCache(chain);
                 log.info("Successfully fetched real derivatives chain with {} total contracts using {}", 
-                        derivativesChain.get().getTotalContracts(), dataSource);
-                return ResponseEntity.ok(derivativesChain.get());
+                        chain.getTotalContracts(), dataSource);
+                return ResponseEntity.ok(chain);
             } else {
                 log.warn("No real data available from any API for {}", normalizedUnderlying);
                 // Return empty chain instead of error
@@ -147,33 +173,29 @@ public class RealDerivativesController {
         
         log.info("real-derivatives/segment request: segment='{}', underlying='{}'", segment, underlying);
 
-        if (!StringUtils.hasText(segment)) {
-            return ResponseEntity.badRequest().body("segment parameter is required");
+        String normalizedUnderlying = sanitizeUnderlying(underlying);
+        if (normalizedUnderlying == null) {
+            return validationError("underlying", "Underlying must be 1-15 characters (A-Z, 0-9, hyphen or underscore)");
         }
 
-        String normalizedUnderlying = StringUtils.capitalize(underlying.toLowerCase());
+        String normalizedSegment = normalizeSegment(segment);
+        if (normalizedSegment == null) {
+            return validationError("segment", "Segment must be one of FUTURES, CALL_OPTIONS or PUT_OPTIONS");
+        }
 
         try {
             // Get full derivatives chain
-            ResponseEntity<?> chainResponse = getRealDerivativesChain(underlying);
-            if (chainResponse.getStatusCode().is2xxSuccessful() && chainResponse.getBody() instanceof DerivativesChain) {
-                DerivativesChain chain = (DerivativesChain) chainResponse.getBody();
-                if (chain != null) {
-                    switch (segment.toUpperCase()) {
-                        case "FUTURES":
-                            return ResponseEntity.ok(chain.getFutures());
-                        case "CALL_OPTIONS":
-                        case "CALLS":
-                            return ResponseEntity.ok(chain.getCallOptions());
-                        case "PUT_OPTIONS":
-                        case "PUTS":
-                            return ResponseEntity.ok(chain.getPutOptions());
-                        default:
-                            return ResponseEntity.badRequest().body("Invalid segment. Use: FUTURES, CALL_OPTIONS, PUT_OPTIONS");
-                    }
-                } else {
-                    log.warn("Derivatives chain is null for segment {} and underlying {}", segment, normalizedUnderlying);
-                    return ResponseEntity.status(500).body("Failed to retrieve derivatives data for segment");
+            ResponseEntity<?> chainResponse = getRealDerivativesChain(normalizedUnderlying);
+            if (chainResponse.getStatusCode().is2xxSuccessful() && chainResponse.getBody() instanceof DerivativesChain chain) {
+                switch (normalizedSegment) {
+                    case "FUTURES":
+                        return ResponseEntity.ok(chain.getFutures());
+                    case "CALL_OPTIONS":
+                        return ResponseEntity.ok(chain.getCallOptions());
+                    case "PUT_OPTIONS":
+                        return ResponseEntity.ok(chain.getPutOptions());
+                    default:
+                        return validationError("segment", "Segment must be one of FUTURES, CALL_OPTIONS or PUT_OPTIONS");
                 }
             } else {
                 return chainResponse;
@@ -192,18 +214,21 @@ public class RealDerivativesController {
     public ResponseEntity<?> getRealStrikePriceMonitoring(@RequestParam(value = "underlying", defaultValue = "NIFTY") String underlying) {
         log.info("real-strike-monitoring request received for underlying='{}'", underlying);
 
+        String normalizedUnderlying = sanitizeUnderlying(underlying);
+        if (normalizedUnderlying == null) {
+            return validationError("underlying", "Underlying must be 1-15 characters (A-Z, 0-9, hyphen or underscore)");
+        }
+
         try {
             // Get full derivatives chain
-            ResponseEntity<?> chainResponse = getRealDerivativesChain(underlying);
-            if (chainResponse.getStatusCode().is2xxSuccessful() && chainResponse.getBody() instanceof DerivativesChain) {
-                DerivativesChain chain = (DerivativesChain) chainResponse.getBody();
-                if (chain != null) {
-                    // Create strike price monitoring response
-                    DerivativesChain monitoringResponse = new DerivativesChain();
-                    monitoringResponse.setUnderlying(chain.getUnderlying());
-                    monitoringResponse.setSpotPrice(chain.getSpotPrice());
-                    monitoringResponse.setDailyStrikePrice(chain.getDailyStrikePrice());
-                    monitoringResponse.setTimestamp(chain.getTimestamp());
+            ResponseEntity<?> chainResponse = getRealDerivativesChain(normalizedUnderlying);
+            if (chainResponse.getStatusCode().is2xxSuccessful() && chainResponse.getBody() instanceof DerivativesChain chain) {
+                // Create strike price monitoring response
+                DerivativesChain monitoringResponse = new DerivativesChain();
+                monitoringResponse.setUnderlying(chain.getUnderlying());
+                monitoringResponse.setSpotPrice(chain.getSpotPrice());
+                monitoringResponse.setDailyStrikePrice(chain.getDailyStrikePrice());
+                monitoringResponse.setTimestamp(chain.getTimestamp());
                 
                 // Filter contracts around strike price (±50 points)
                 BigDecimal strikePrice = chain.getDailyStrikePrice();
@@ -250,10 +275,6 @@ public class RealDerivativesController {
                     });
                 
                 return ResponseEntity.ok(monitoringResponse);
-                } else {
-                    log.warn("Derivatives chain is null for strike price monitoring for {}", underlying);
-                    return ResponseEntity.status(500).body("Failed to retrieve strike price monitoring data");
-                }
             } else {
                 return chainResponse;
             }
@@ -272,6 +293,11 @@ public class RealDerivativesController {
             @RequestParam(value = "underlying", defaultValue = "NIFTY") String underlying) {
         
         log.info("Debug derivatives chain for underlying: {}", underlying);
+
+        String normalizedUnderlying = sanitizeUnderlying(underlying);
+        if (normalizedUnderlying == null) {
+            return validationError("underlying", "Underlying must be 1-15 characters (A-Z, 0-9, hyphen or underscore)");
+        }
         
         try {
             BigDecimal spotPrice = new BigDecimal("25000");
@@ -298,6 +324,161 @@ public class RealDerivativesController {
             Map<String, Object> error = new HashMap<>();
             error.put("error", e.getMessage());
             return ResponseEntity.status(500).body(error);
+        }
+    }
+    
+    /**
+     * Get the latest snapshot with live data from Zerodha API.
+     * GET /api/latest?underlying=NIFTY
+     * 
+     * This endpoint:
+     * 1. Attempts to fetch live data from Zerodha API
+     * 2. If successful, returns live data immediately and updates cache in parallel
+     * 3. If Zerodha API fails, falls back to cached data
+     * 4. If cache also fails, returns empty chain
+     */
+    @GetMapping("/latest")
+    public ResponseEntity<?> getLatest(@RequestParam(value = "underlying", defaultValue = "NIFTY") String underlying) {
+        log.debug("latest request received for underlying='{}'", underlying);
+        
+        String normalizedUnderlying = sanitizeUnderlying(underlying);
+        if (normalizedUnderlying == null) {
+            return validationError("underlying", "Underlying must be 1-15 characters (A-Z, 0-9, hyphen or underscore)");
+        }
+        
+        try {
+            // Step 1: Try to fetch live data from Zerodha API
+            Optional<DerivativesChain> liveData = Optional.empty();
+            if (zerodhaEnabled && zerodhaSessionService.hasActiveAccessToken()) {
+                try {
+                    log.debug("Attempting to fetch live data from Zerodha API for underlying='{}'", normalizedUnderlying);
+                    liveData = zerodhaApiAdapter.getDerivativesChain(normalizedUnderlying);
+                    
+                    if (liveData.isPresent()) {
+                        DerivativesChain chain = liveData.get();
+                        chain.setDataSource("ZERODHA_KITE");
+                        
+                        // Update cache in parallel (non-blocking)
+                        // Use executor service to avoid blocking the response
+                        cacheUpdateExecutor.submit(() -> {
+                            try {
+                                latestSnapshotCacheService.updateCache(chain);
+                                log.debug("Cache updated with live data for underlying='{}'", normalizedUnderlying);
+                            } catch (Exception e) {
+                                log.warn("Failed to update cache in background: {}", e.getMessage());
+                            }
+                        });
+                        
+                        log.debug("Returning live data from Zerodha API for underlying='{}' with {} contracts", 
+                                normalizedUnderlying, chain.getTotalContracts());
+                        return ResponseEntity.ok(chain);
+                    } else {
+                        log.debug("Zerodha API returned no data for underlying='{}', falling back to cache", normalizedUnderlying);
+                    }
+                } catch (Exception e) {
+                    log.warn("Error fetching live data from Zerodha API for underlying='{}': {}. Falling back to cache.", 
+                            normalizedUnderlying, e.getMessage());
+                    // Continue to cache fallback
+                }
+            } else {
+                log.debug("Zerodha not enabled or session not active, falling back to cache");
+            }
+            
+            // Step 2: Fallback to cache if live data fetch failed or unavailable
+            Optional<DerivativesChain> cached = latestSnapshotCacheService.getLatest();
+            if (cached.isPresent()) {
+                DerivativesChain chain = cached.get();
+                // Verify underlying matches (for future multi-underlying support)
+                if (normalizedUnderlying.equals(chain.getUnderlying())) {
+                    log.debug("Returning cached snapshot for underlying='{}' with {} contracts (live data unavailable)", 
+                            normalizedUnderlying, chain.getTotalContracts());
+                    return ResponseEntity.ok(chain);
+                } else {
+                    log.warn("Cached snapshot underlying mismatch: requested={}, cached={}", 
+                            normalizedUnderlying, chain.getUnderlying());
+                }
+            }
+            
+            // Step 3: Both live and cache failed - return empty chain
+            log.debug("Both live data and cache unavailable for underlying='{}', returning empty chain", normalizedUnderlying);
+            DerivativesChain emptyChain = new DerivativesChain(normalizedUnderlying, new BigDecimal("25000"));
+            emptyChain.setDailyStrikePrice(new BigDecimal("25000"));
+            emptyChain.setTimestamp(Instant.now());
+            emptyChain.setDataSource("NO_DATA");
+            return ResponseEntity.ok(emptyChain);
+        } catch (Exception e) {
+            log.error("Error retrieving latest snapshot for {}: {}", underlying, e.getMessage(), e);
+            
+            // Last resort: try to return cached data even on error
+            try {
+                Optional<DerivativesChain> cached = latestSnapshotCacheService.getLatest();
+                if (cached.isPresent()) {
+                    DerivativesChain chain = cached.get();
+                    if (normalizedUnderlying.equals(chain.getUnderlying())) {
+                        log.info("Returning cached data as fallback after error");
+                        return ResponseEntity.ok(chain);
+                    }
+                }
+            } catch (Exception cacheError) {
+                log.error("Failed to retrieve cache as fallback: {}", cacheError.getMessage());
+            }
+            
+            return ResponseEntity.status(500).body("Error: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Update the cache update interval (backend polling rate).
+     * PUT /api/refresh-interval
+     * Body: { "intervalMs": 1000 }
+     */
+    @CrossOrigin(origins = "*", methods = {RequestMethod.PUT, RequestMethod.OPTIONS})
+    @PutMapping("/refresh-interval")
+    public ResponseEntity<?> updateRefreshInterval(@RequestBody Map<String, Object> request) {
+        try {
+            Object intervalObj = request.get("intervalMs");
+            if (intervalObj == null) {
+                return ResponseEntity.badRequest().body(Map.of("error", "intervalMs is required"));
+            }
+            
+            long intervalMs;
+            if (intervalObj instanceof Number) {
+                intervalMs = ((Number) intervalObj).longValue();
+            } else {
+                intervalMs = Long.parseLong(intervalObj.toString());
+            }
+            
+            if (intervalMs < 250) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Interval must be at least 250ms"));
+            }
+            
+            dynamicCacheUpdateScheduler.updateInterval(intervalMs);
+            log.info("Updated cache update interval to {}ms", intervalMs);
+            
+            return ResponseEntity.ok(Map.of(
+                "success", true,
+                "intervalMs", intervalMs,
+                "message", "Cache update interval updated successfully"
+            ));
+        } catch (Exception e) {
+            log.error("Error updating refresh interval: {}", e.getMessage(), e);
+            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+        }
+    }
+    
+    /**
+     * Get the current cache update interval.
+     * GET /api/refresh-interval
+     */
+    @CrossOrigin(origins = "*")
+    @GetMapping("/refresh-interval")
+    public ResponseEntity<?> getRefreshInterval() {
+        try {
+            long intervalMs = dynamicCacheUpdateScheduler.getCurrentInterval();
+            return ResponseEntity.ok(Map.of("intervalMs", intervalMs));
+        } catch (Exception e) {
+            log.error("Error getting refresh interval: {}", e.getMessage(), e);
+            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
         }
     }
     
@@ -372,5 +553,40 @@ public class RealDerivativesController {
         health.put("primaryDataSource", primaryDataSource);
         
         return ResponseEntity.ok(health);
+    }
+
+    @ExceptionHandler(ConstraintViolationException.class)
+    public ResponseEntity<Map<String, Object>> handleConstraintViolation(ConstraintViolationException ex) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("error", "INVALID_REQUEST");
+        response.put("details", ex.getConstraintViolations().stream()
+                .map(ConstraintViolation::getMessage)
+                .toList());
+        return ResponseEntity.badRequest().body(response);
+    }
+
+    private String sanitizeUnderlying(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return null;
+        }
+        String normalized = URLDecoder.decode(raw, StandardCharsets.UTF_8).trim().toUpperCase();
+        if (!UNDERLYING_PATTERN.matcher(normalized).matches()) {
+            return null;
+        }
+        return normalized;
+    }
+
+    private String normalizeSegment(String segment) {
+        if (segment == null) {
+            return null;
+        }
+        return SEGMENT_ALIASES.get(segment.trim().toUpperCase());
+    }
+
+    private ResponseEntity<Map<String, Object>> validationError(String field, String message) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("error", "INVALID_" + field.toUpperCase());
+        body.put("message", message);
+        return ResponseEntity.badRequest().body(body);
     }
 }

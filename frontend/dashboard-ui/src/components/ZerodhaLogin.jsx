@@ -1,142 +1,239 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { fetchZerodhaSession, fetchZerodhaAuthUrl } from '../api/client';
+import { fetchZerodhaAuthUrl, fetchZerodhaSession } from '../api/client';
+import { useRefreshInterval } from '../contexts/RefreshIntervalContext';
+import ToggleSwitch from './ToggleSwitch';
+import { useTheme } from '../contexts/ThemeContext';
 
 export default function ZerodhaLogin() {
+  const [authUrl, setAuthUrl] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [polling, setPolling] = useState(false);
+  const [error, setError] = useState(null);
+  const [pollCount, setPollCount] = useState(0);
   const navigate = useNavigate();
-  const [state, setState] = useState({
-    loading: true,
-    authLoading: false,
-    authUrl: null,
-    message: '',
-    error: null
-  });
+  const { intervalMs } = useRefreshInterval();
+  const { isDarkMode } = useTheme();
 
-  const loadSession = useCallback(async () => {
-    setState(prev => ({ ...prev, loading: true, error: null }));
+  const checkSession = async () => {
     try {
-      const result = await fetchZerodhaSession();
-      if (result?.active) {
+      const session = await fetchZerodhaSession();
+      const active =
+        session?.status === 'ACTIVE' ||
+        session?.status === 'active' ||
+        session?.active === true ||
+        session?.session_cached === true;
+      if (active) {
+        setPolling(false);
         navigate('/', { replace: true });
-        return;
+        return true;
       }
-
-      setState(prev => ({
-        ...prev,
-        loading: false,
-        message: result?.message || 'Please sign in with your Zerodha account to continue.',
-        authUrl: prev.authUrl,
-        error: null
-      }));
-    } catch (error) {
-      console.error('ZerodhaLogin: failed to check session', error);
-      setState(prev => ({
-        ...prev,
-        loading: false,
-        error: 'Unable to verify Zerodha session. Please retry.'
-      }));
+    } catch (err) {
+      console.error('Error verifying Zerodha session:', err);
     }
-  }, [navigate]);
+    return false;
+  };
 
-  useEffect(() => {
-    loadSession();
-  }, [loadSession]);
-
-  const requestAuthUrl = useCallback(async () => {
-    setState(prev => ({ ...prev, authLoading: true, error: null }));
+  const refreshAuthUrl = async () => {
     try {
-      const authData = await fetchZerodhaAuthUrl();
-      setState(prev => ({
-        ...prev,
-        authLoading: false,
-        authUrl: authData?.auth_url || null,
-        message: authData?.message || prev.message || 'Authenticate with Zerodha to continue.'
-      }));
-    } catch (error) {
-      console.error('ZerodhaLogin: failed to fetch auth URL', error);
-      setState(prev => ({
-        ...prev,
-        authLoading: false,
-        error: 'Unable to fetch Zerodha login link. Please retry.'
-      }));
-    }
-  }, []);
-
-  const handleLoginClick = () => {
-    if (state.authUrl) {
-      window.open(state.authUrl, '_blank', 'noopener');
-    } else {
-      requestAuthUrl();
+      setLoading(true);
+      setError(null);
+      const { url } = await fetchZerodhaAuthUrl();
+      if (!url) {
+        setError('Zerodha login URL was not returned. Please confirm your API key configuration.');
+        setAuthUrl(null);
+        return false;
+      }
+      setAuthUrl(url);
+      return true;
+    } catch (err) {
+      console.error('Error fetching Zerodha auth URL:', err);
+      setError('Unable to fetch Zerodha login URL. Please check network connectivity and try again.');
+      setAuthUrl(null);
+      return false;
+    } finally {
+      setLoading(false);
     }
   };
 
-  if (state.loading) {
+  useEffect(() => {
+    const prime = async () => {
+      const alreadyActive = await checkSession();
+      if (alreadyActive) {
+        return;
+      }
+      await refreshAuthUrl();
+    };
+
+    prime();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!polling) return;
+
+    let cancelled = false;
+
+    const pollSession = async () => {
+      if (cancelled) return;
+      const active = await checkSession();
+      if (!active) {
+        setPollCount(prev => prev + 1);
+      }
+    };
+
+    pollSession();
+    const timer = setInterval(pollSession, intervalMs);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [polling, intervalMs, navigate]);
+
+  const startPolling = () => {
+    setError(null);
+    setPolling(true);
+    setPollCount(0);
+  };
+
+  const stopPolling = () => {
+    setPolling(false);
+  };
+
+  const openZerodhaLogin = async () => {
+    if (!authUrl) {
+      const fetched = await refreshAuthUrl();
+      if (!fetched) {
+        return;
+      }
+    }
+
+    try {
+      const popup = window.open(authUrl, 'kite-login', 'noopener,noreferrer,width=620,height=720,left=120,top=80');
+      if (!popup) {
+        setError('Popup blocked. Allow popups for this site and try again (look for a blocked-popup icon near the address bar).');
+        return;
+      }
+      popup.focus();
+      setError(null);
+      startPolling();
+    } catch (err) {
+      console.error('Failed to open Zerodha login window:', err);
+      setError('Unable to open Zerodha login window. Please check popup settings and try again.');
+    }
+  };
+
+  const pageBackground = isDarkMode ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-gray-900';
+  const cardBackground = isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-blue-200';
+  const mutedText = isDarkMode ? 'text-slate-300' : 'text-gray-600';
+  const subtleText = isDarkMode ? 'text-slate-400' : 'text-gray-500';
+  const buttonBorder = isDarkMode ? 'border-slate-600 hover:bg-slate-700 text-slate-200' : 'border-gray-300 hover:bg-gray-50 text-gray-700';
+  const primaryButton = isDarkMode
+    ? 'bg-blue-500 hover:bg-blue-600 text-white'
+    : 'bg-blue-600 hover:bg-blue-700 text-white';
+  const alertBox = isDarkMode
+    ? 'border-red-500/60 bg-red-900/20 text-red-300'
+    : 'border-red-200 bg-red-50 text-red-700';
+
+  if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900">
-        <div className="text-center space-y-3">
-          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="text-sm text-gray-600 dark:text-gray-300">Checking Zerodha session…</p>
+      <div className={`min-h-screen flex items-center justify-center ${pageBackground}`}>
+        <div className="text-center">
+          <div className="w-10 h-10 border-b-2 border-blue-500 rounded-full animate-spin mx-auto mb-4"></div>
+          <p className={`text-sm ${mutedText}`}>Checking Zerodha session…</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex items-center justify-center px-4 py-10">
-      <div className="max-w-xl w-full bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-blue-200 dark:border-slate-700 p-8 space-y-6">
-        <div className="flex items-center gap-3">
-          <span className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-blue-100 text-blue-600 text-xl">
-            🔐
-          </span>
+    <div className={`min-h-screen flex items-center justify-center px-4 py-10 ${pageBackground}`}>
+      <div
+        className={`max-w-xl w-full rounded-2xl shadow-xl border p-8 space-y-6 ${cardBackground}`}
+      >
+        <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Zerodha Login Required</h1>
-            <p className="text-gray-600 dark:text-gray-400 mt-1">
-              {state.message || 'Authenticate with Zerodha to access live derivatives data.'}
+            <h1 className="text-2xl font-bold">Zerodha Login Required</h1>
+            <p className={`mt-1 ${mutedText}`}>
+              Connect your Zerodha account to access live derivatives data.
             </p>
           </div>
+          <button
+            type="button"
+            onClick={refreshAuthUrl}
+            className={`inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded border transition-colors ${buttonBorder}`}
+            title="Refresh Zerodha login URL"
+          >
+            Refresh Link
+          </button>
         </div>
 
-        {state.error && (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-900/20 dark:border-red-800 dark:text-red-300">
-            {state.error}
+        {error && (
+          <div className={`rounded-lg border px-4 py-3 text-sm ${alertBox}`}>
+            {error}
           </div>
         )}
 
-        <div className="space-y-3 text-sm text-gray-600 dark:text-gray-300">
-          <p>Steps to continue:</p>
-          <ol className="list-decimal list-inside space-y-1">
-            <li>Click “Log in to Zerodha” to open the secure Zerodha Connect page.</li>
-            <li>Complete the Zerodha login and PIN verification.</li>
-            <li>When redirected back, this dashboard will load automatically.</li>
+        <div className={`space-y-3 text-sm ${mutedText}`}>
+          <p>
+            Follow the steps below to authenticate your Zerodha session and start the live feed.
+          </p>
+          <ol className="list-decimal list-inside space-y-2">
+            <li>Allow popups for this site (check the address bar if blocked).</li>
+            <li>Launch the Zerodha login window.</li>
+            <li>Complete authentication in the popup.</li>
+            <li>Return here; polling will automatically detect the active session.</li>
           </ol>
         </div>
 
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className={`space-y-6 text-xs ${subtleText}`}>
+          <div className="flex items-center gap-3">
+            <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+            <span>Attempts made: {pollCount}</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+            <span>Session polling is {polling ? 'active' : 'inactive'}.</span>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <ToggleSwitch
+            enabled={polling}
+            onChange={polling ? stopPolling : startPolling}
+            label="Session polling"
+            description="Automatically check for active Zerodha session"
+          />
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <button
             type="button"
-            onClick={handleLoginClick}
-            disabled={state.authLoading}
-            className="inline-flex items-center justify-center px-5 py-2.5 rounded-full bg-blue-600 hover:bg-blue-700 text-white font-semibold shadow-md disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+            onClick={openZerodhaLogin}
+            className={`inline-flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-semibold shadow transition-colors ${primaryButton}`}
           >
-            {state.authLoading ? 'Preparing link…' : 'Log in to Zerodha'}
+            Open Zerodha Login
           </button>
-          <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
-            <button
-              type="button"
-              onClick={requestAuthUrl}
-              disabled={state.authLoading}
-              className="px-4 py-2 rounded-full border border-gray-300 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors"
-            >
-              Refresh Link
-            </button>
-            <button
-              type="button"
-              onClick={loadSession}
-              className="px-4 py-2 rounded-full border border-gray-300 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors"
-            >
-              Recheck Session
-            </button>
+          <button
+            type="button"
+            onClick={polling ? stopPolling : startPolling}
+            className={`inline-flex items-center justify-center gap-2 px-4 py-3 rounded-lg border font-semibold transition-colors ${buttonBorder}`}
+          >
+            {polling ? 'Stop Polling' : 'Start Polling'}
+          </button>
+        </div>
+
+        {!authUrl && !loading && (
+          <div className={`text-xs rounded-md border px-3 py-2 ${alertBox}`}>
+            Zerodha login link is currently unavailable. Click "Refresh Link" and ensure your API credentials are correct.
           </div>
+        )}
+
+        <div className={`flex items-center gap-3 text-xs ${subtleText}`}>
+          <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-blue-400 text-blue-500 font-semibold">i</span>
+          <p>
+            After logging in, polling checks for an active session and will automatically redirect to the dashboard.
+          </p>
         </div>
       </div>
     </div>

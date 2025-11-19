@@ -1,51 +1,53 @@
 import React, { useEffect, useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { fetchZerodhaSession } from '../api/client';
+import { useTheme } from '../contexts/ThemeContext';
 
 export default function RequireZerodhaSession({ children }) {
-  const [state, setState] = useState({ loading: true, active: false });
+  const [checking, setChecking] = useState(true);
+  const [sessionActive, setSessionActive] = useState(false);
+  const navigate = useNavigate();
+  const { isDarkMode } = useTheme();
 
   useEffect(() => {
-    let mounted = true;
-
-    const checkSession = async () => {
+    const verify = async () => {
       try {
-        const result = await fetchZerodhaSession();
-        if (!mounted) return;
+        const session = await fetchZerodhaSession();
+        const active =
+          session?.status === 'ACTIVE' ||
+          session?.status === 'active' ||
+          session?.active === true ||
+          session?.session_cached === true;
 
-        if (result?.active) {
-          setState({ loading: false, active: true });
+        if (active) {
+          setSessionActive(true);
         } else {
-          setState({ loading: false, active: false });
+          navigate('/zerodha-login', { replace: true });
         }
       } catch (error) {
-        console.error('RequireZerodhaSession: failed to verify session', error);
-        if (mounted) {
-          setState({ loading: false, active: false });
-        }
+        console.error('Error verifying Zerodha session:', error);
+        navigate('/zerodha-login', { replace: true });
+      } finally {
+        setChecking(false);
       }
     };
 
-    checkSession();
+    verify();
+  }, [navigate]);
 
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  if (state.loading) {
+  if (checking) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900">
-        <div className="text-center space-y-3">
-          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="text-sm text-gray-600 dark:text-gray-300">Verifying Zerodha session…</p>
+      <div className={`min-h-screen flex items-center justify-center ${isDarkMode ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-gray-900'}`}>
+        <div className="text-center">
+          <div className="w-10 h-10 border-b-2 border-blue-500 rounded-full animate-spin mx-auto mb-4"></div>
+          <p className={`text-sm ${isDarkMode ? 'text-slate-300' : 'text-gray-600'}`}>Verifying Zerodha session…</p>
         </div>
       </div>
     );
   }
 
-  if (!state.active) {
-    return <Navigate to="/zerodha-login" replace />;
+  if (!sessionActive) {
+    return null;
   }
 
   return <>{children}</>;

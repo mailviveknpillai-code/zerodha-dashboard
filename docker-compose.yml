@@ -51,7 +51,10 @@ services:
       ZERODHA_ENABLED: "${ZERODHA_ENABLED:-true}"
       ZERODHA_API_KEY: "${ZERODHA_API_KEY:-hvgaaodyzyhzq57s}"
       ZERODHA_API_SECRET: "${ZERODHA_API_SECRET:-r6t8jx9lk6xb1vrckgwrqi4owjd2u314}"
-      ZERODHA_REDIRECT_URI: "${ZERODHA_REDIRECT_URI:-https://reed-shaped-spoke-sealed.trycloudflare.com/api/zerodha/callback}"
+      PUBLIC_TUNNEL_URL: "${PUBLIC_TUNNEL_URL:-https://eternal-into-provided-dynamic.trycloudflare.com}"
+      ZERODHA_REDIRECT_URI: "${ZERODHA_REDIRECT_URI:-https://eternal-into-provided-dynamic.trycloudflare.com/api/zerodha/callback}"
+      # CORS Configuration - Allow tunnel URL and localhost
+      ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-http://localhost:5173,https://eternal-into-provided-dynamic.trycloudflare.com}"
       # Mock Data Configuration (DISABLED when Zerodha is enabled)
       MOCK_DATA_ENABLED: "${MOCK_DATA_ENABLED:-false}"
       MOCK_SPOT_PRICE: "${MOCK_SPOT_PRICE:-25000}"
