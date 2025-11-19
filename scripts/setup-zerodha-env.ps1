@@ -5,7 +5,7 @@ param(
     [string]$ApiKey,
     [string]$AccessToken,
     [string]$ApiSecret,
-    [string]$RedirectUrl = "https://aka-steps-blah-speakers.trycloudflare.com/api/zerodha/callback",
+    [string]$RedirectUrl = "https://eternal-into-provided-dynamic.trycloudflare.com/api/zerodha/callback",
     [string]$InstrumentsUrl = "https://api.kite.trade/instruments/NFO"
 )
 

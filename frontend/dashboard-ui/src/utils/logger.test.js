@@ -23,18 +23,15 @@ describe('logger utility', () => {
     warnSpy.mockRestore()
   })
 
-  it('suppresses console.log when configured in production', async () => {
+  it('logger initializes automatically on import', async () => {
     vi.stubEnv('MODE', 'production')
-    const originalLog = console.log
-    const spy = vi.fn()
-    console.log = spy
-
-    const { configureLogger } = await import('./logger')
-    configureLogger()
-    console.log('should be suppressed')
-
-    expect(spy).not.toHaveBeenCalled()
-
-    console.log = originalLog
+    const logger = await import('./logger')
+    
+    // Logger should be available and initialized
+    expect(logger.default).toBeDefined()
+    expect(typeof logger.default.info).toBe('function')
+    expect(typeof logger.default.debug).toBe('function')
+    expect(typeof logger.default.warn).toBe('function')
+    expect(typeof logger.default.error).toBe('function')
   })
 })

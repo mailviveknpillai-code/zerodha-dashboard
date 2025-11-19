@@ -1,153 +1,76 @@
-import React, { useMemo, useEffect, useState, memo, useRef } from 'react';
+import React, { useMemo, useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { fetchDerivatives } from '../api/client';
 import FuturesTable from './FuturesTable';
 import OptionsTable from './OptionsTable';
-import { ContractColorProvider } from '../contexts/ContractColorContext';
+import { ContractColorProvider, useContractColoringContext } from '../contexts/ContractColorContext';
 import { useRefreshInterval } from '../contexts/RefreshIntervalContext';
+import { useVolumeWindow } from '../contexts/VolumeWindowContext';
+import useLatestDerivativesFeed from '../hooks/useLatestDerivativesFeed';
+import { fetchDerivatives } from '../api/client';
+import { useTheme } from '../contexts/ThemeContext';
+import logger from '../utils/logger';
+import { useIncrementalVolumeMap } from '../hooks/useIncrementalVolume';
 
 function DerivativesDashboard({ 
   selectedContract,
   onConnectionStatusChange = () => {},
   connectionWarning = null,
+  onDataUpdate = () => {},
 }) {
+  const { isDarkMode } = useTheme();
   const { intervalMs } = useRefreshInterval();
-  const [derivativesData, setDerivativesData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const { volumeWindowMs } = useVolumeWindow();
   const [minusStrikeCollapsed, setMinusStrikeCollapsed] = useState(false);
   const [plusStrikeCollapsed, setPlusStrikeCollapsed] = useState(false);
   const [dynamicStrikeIndex, setDynamicStrikeIndex] = useState(null);
+  const [isStrikeLocked, setIsStrikeLocked] = useState(false); // Track if strike is manually locked
+  const [lockedStrikeValue, setLockedStrikeValue] = useState(null); // Store the actual strike value when locked
   const [dynamicTableCollapsed, setDynamicTableCollapsed] = useState(false);
   const navigate = useNavigate();
-  const isFetchingRef = useRef(false);
-  const timerRef = useRef(null);
-  const latestDataRef = useRef(null);
+  const initialFetchDoneRef = useRef(false);
+  
+  // Track incremental volume changes over configurable rolling windows
+  const { updateVolume: updateIncrementalVolume } = useIncrementalVolumeMap(volumeWindowMs);
+  
+  // Do one initial full fetch to populate cache (runs in background)
+  useEffect(() => {
+    if (!initialFetchDoneRef.current) {
+      initialFetchDoneRef.current = true;
+      // Trigger initial full fetch to populate cache
+      // This runs in parallel with /latest polling
+      fetchDerivatives('NIFTY')
+        .then(data => {
+          console.debug('Initial cache population completed:', data?.totalContracts || 0, 'contracts');
+        })
+        .catch(err => {
+          console.error('Initial fetch failed (will retry via polling):', err);
+        });
+    }
+  }, []);
+  
+  // Use /latest endpoint for high-frequency polling (cached, fast)
+  // Polls immediately - will return empty data until cache is populated by initial fetch or scheduler
+  
+  const { data: derivativesData, loading } = useLatestDerivativesFeed({
+    symbol: 'NIFTY',
+    intervalMs,
+    onConnectionStatusChange,
+    onAuthFailure: () => navigate('/', { replace: true }),
+    fallbackToFullFetch: false,
+  });
+
+  // Notify parent component when data updates (single source of truth)
+  useEffect(() => {
+    if (derivativesData) {
+      onDataUpdate(derivativesData);
+    }
+  }, [derivativesData, onDataUpdate]);
 
   const formatStrikeValue = (value) => {
     if (value === null || value === undefined || value === '') return '-';
     const numeric = Number(value);
     return Number.isFinite(numeric) ? numeric.toLocaleString() : String(value);
   };
-
-  console.log('🔄 DerivativesDashboard: Component rendered/re-mounted', {
-    selectedContract: selectedContract?.tradingsymbol,
-    hasData: !!derivativesData
-  });
-
-  // Load derivatives data
-  useEffect(() => {
-    let mounted = true;
-    
-    const loadDerivatives = async () => {
-      try {
-        if (isFetchingRef.current) {
-          return;
-        }
-        isFetchingRef.current = true;
-        console.log('🚀 DerivativesDashboard: Loading derivatives data...');
-        if (!derivativesData) setLoading(true);
-        const data = await fetchDerivatives('NIFTY');
-        console.log('✅ DerivativesDashboard: Derivatives data loaded:', data);
-
-        if (!mounted) {
-          return;
-        }
-
-        const futuresCount = Array.isArray(data?.futures) ? data.futures.length : 0;
-        const callCount = Array.isArray(data?.callOptions) ? data.callOptions.length : 0;
-        const putCount = Array.isArray(data?.putOptions) ? data.putOptions.length : 0;
-        const hasContracts = futuresCount + callCount + putCount > 0;
-
-        if (hasContracts) {
-          latestDataRef.current = data;
-          setDerivativesData(data);
-          onConnectionStatusChange(null);
-        } else {
-          console.warn('⚠️ DerivativesDashboard: No live contracts returned from Zerodha API');
-
-          onConnectionStatusChange({
-            type: 'no-data',
-            message: 'Zerodha API did not return live contracts. Showing the last known prices until the feed recovers.',
-          });
-
-          if (latestDataRef.current) {
-            const previous = latestDataRef.current;
-            const merged = {
-              ...previous,
-              ...data,
-              futures: previous.futures || [],
-              callOptions: previous.callOptions || [],
-              putOptions: previous.putOptions || [],
-              totalContracts: previous.totalContracts ?? futuresCount + callCount + putCount,
-            };
-            latestDataRef.current = merged;
-            setDerivativesData(merged);
-          } else {
-            // No historical data yet; show what we have and allow UI to render warning
-            latestDataRef.current = data;
-            setDerivativesData(data);
-          }
-        }
-      } catch (error) {
-        console.error('❌ DerivativesDashboard: Error loading data:', error);
-        if (mounted && error?.response?.status === 401) {
-          navigate('/', { replace: true });
-          return;
-        }
-
-        if (mounted) {
-          const message = deriveConnectionErrorMessage(error);
-          onConnectionStatusChange({
-            type: 'error',
-            message,
-          });
-
-          if (!latestDataRef.current) {
-            setDerivativesData({
-              underlying: 'NIFTY',
-              spotPrice: null,
-              dailyStrikePrice: null,
-              futures: [],
-              callOptions: [],
-              putOptions: [],
-              totalContracts: 0,
-              dataSource: 'ERROR',
-            });
-          } else {
-            setDerivativesData(latestDataRef.current);
-          }
-        }
-      } finally {
-        if (mounted) {
-          setLoading(false);
-        }
-        isFetchingRef.current = false;
-      }
-    };
-    
-    // Load data immediately
-    const scheduleNext = () => {
-      if (!mounted) return;
-      timerRef.current = setTimeout(async () => {
-        await loadDerivatives();
-        scheduleNext();
-      }, intervalMs);
-    };
-
-    loadDerivatives().then(() => {
-      if (mounted) {
-        scheduleNext();
-      }
-    });
-    
-    return () => {
-      mounted = false;
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-      }
-      isFetchingRef.current = false;
-    };
-  }, [navigate, intervalMs, onConnectionStatusChange]);
 
   const organizedData = useMemo(() => {
     if (!derivativesData) {
@@ -427,6 +350,11 @@ function DerivativesDashboard({
         ? `${sectionType}:${option.instrumentToken || option.tradingsymbol || segmentLabel}`
         : null;
 
+      // Calculate incremental volume (cumulative change over 5-minute window)
+      const incrementalVolData = contractKey && rawVol !== null 
+        ? updateIncrementalVolume(contractKey, rawVol)
+        : { incrementalVol: 0, volumeChange: 0, displayValue: '-', rawValue: null };
+
       let changeDisplay = '';
       if (option?.change != null) {
         const formatted = formatPrice(option.change);
@@ -452,8 +380,10 @@ function DerivativesDashboard({
         changePercentRaw: rawChangePercent,
         oi: rawOi != null ? formatInteger(rawOi) : '',
         oiRaw: rawOi,
-        vol: rawVol != null ? formatInteger(rawVol) : '',
-        volRaw: rawVol,
+        vol: incrementalVolData.displayValue,
+        volRaw: incrementalVolData.rawValue, // For coloring - incremental volume
+        volChange: incrementalVolData.volumeChange, // Change in this refresh
+        originalVol: rawVol, // Original API volume for tooltip
         bid: rawBid != null ? formatPrice(rawBid) : '',
         bidRaw: rawBid,
         ask: rawAsk != null ? formatPrice(rawAsk) : '',
@@ -536,18 +466,34 @@ function DerivativesDashboard({
       const rawAsk = future?.ask != null ? Number(future.ask) : null;
       const rawBidQty = future?.bidQuantity != null ? Number(future.bidQuantity) : null;
       const rawAskQty = future?.askQuantity != null ? Number(future.askQuantity) : null;
+
+      // Calculate incremental volume (cumulative change over 5-minute window)
+      const incrementalVolData = contractKey && rawVol !== null 
+        ? updateIncrementalVolume(contractKey, rawVol)
+        : { incrementalVol: 0, volumeChange: 0, displayValue: '-', rawValue: null };
+
+      // Format change with +/- symbol for futures
+      let changeDisplay = '';
+      if (rawChange != null) {
+        const formatted = formatPrice(rawChange);
+        const numeric = Number(rawChange);
+        changeDisplay = numeric > 0 ? `+${formatted}` : numeric < 0 ? formatted : `±${formatted}`;
+      }
+
       return {
         segment: future.tradingsymbol || 'NIFTY FUT',
         ltp: rawLastPrice != null ? formatPrice(rawLastPrice) : '',
         ltpRaw: rawLastPrice,
-        change: rawChange != null ? formatPrice(rawChange) : '',
+        change: changeDisplay,
         changeRaw: rawChange,
         changePercent: rawChangePercent != null ? formatPrice(rawChangePercent) : '',
         changePercentRaw: rawChangePercent,
         oi: rawOi != null ? formatInteger(rawOi) : '',
         oiRaw: rawOi,
-        vol: rawVol != null ? formatInteger(rawVol) : '',
-        volRaw: rawVol,
+        vol: incrementalVolData.displayValue,
+        volRaw: incrementalVolData.rawValue, // For coloring - incremental volume
+        volChange: incrementalVolData.volumeChange, // Change in this refresh
+        originalVol: rawVol, // Original API volume for tooltip
         bid: rawBid != null ? formatPrice(rawBid) : '',
         bidRaw: rawBid,
         ask: rawAsk != null ? formatPrice(rawAsk) : '',
@@ -588,50 +534,64 @@ function DerivativesDashboard({
 
     const belowRows = [];
     const belowLabel = desiredMinusStrike != null ? formatStrikeValue(desiredMinusStrike) : 'N/A';
+    // Below spot: Calls are ITM (strike < spot), Puts are OTM (strike < spot)
     belowRows.push(buildHeaderRow({
-      badgeLabel: 'CALL OPTIONS',
-      badgeTone: 'call',
+      badgeLabel: 'CALL / ITM',
+      badgeTone: 'call-itm',
       segment: `Strike: ${belowLabel}`,
       sectionType: 'calls'
     }));
     if (belowCall) {
-      belowRows.push(buildOptionRow(belowCall, 'calls', 'contract-only'));
+      const callRow = buildOptionRow(belowCall, 'calls', 'contract-only');
+      callRow.badgeLabel = 'CALL / ITM';
+      callRow.badgeTone = 'call-itm';
+      belowRows.push(callRow);
     } else {
       belowRows.push(buildInfoRow('No call options available at this strike', 'calls'));
     }
     belowRows.push(buildHeaderRow({
-      badgeLabel: 'PUT OPTIONS',
-      badgeTone: 'put',
+      badgeLabel: 'PUT / OTM',
+      badgeTone: 'put-otm',
       segment: `Strike: ${belowLabel}`,
       sectionType: 'puts'
     }));
     if (belowPut) {
-      belowRows.push(buildOptionRow(belowPut, 'puts', 'contract-only'));
+      const putRow = buildOptionRow(belowPut, 'puts', 'contract-only');
+      putRow.badgeLabel = 'PUT / OTM';
+      putRow.badgeTone = 'put-otm';
+      belowRows.push(putRow);
     } else {
       belowRows.push(buildInfoRow('No put options available at this strike', 'puts'));
     }
 
     const aboveRows = [];
     const aboveLabel = desiredPlusStrike != null ? formatStrikeValue(desiredPlusStrike) : 'N/A';
+    // Above spot: Calls are OTM (strike > spot), Puts are ITM (strike > spot)
     aboveRows.push(buildHeaderRow({
-      badgeLabel: 'CALL OPTIONS',
-      badgeTone: 'call',
+      badgeLabel: 'CALL / OTM',
+      badgeTone: 'call-otm',
       segment: `Strike: ${aboveLabel}`,
       sectionType: 'calls'
     }));
     if (aboveCall) {
-      aboveRows.push(buildOptionRow(aboveCall, 'calls', 'contract-only'));
+      const callRow = buildOptionRow(aboveCall, 'calls', 'contract-only');
+      callRow.badgeLabel = 'CALL / OTM';
+      callRow.badgeTone = 'call-otm';
+      aboveRows.push(callRow);
     } else {
       aboveRows.push(buildInfoRow('No call options available at this strike', 'calls'));
     }
     aboveRows.push(buildHeaderRow({
-      badgeLabel: 'PUT OPTIONS',
-      badgeTone: 'put',
+      badgeLabel: 'PUT / ITM',
+      badgeTone: 'put-itm',
       segment: `Strike: ${aboveLabel}`,
       sectionType: 'puts'
     }));
     if (abovePut) {
-      aboveRows.push(buildOptionRow(abovePut, 'puts', 'contract-only'));
+      const putRow = buildOptionRow(abovePut, 'puts', 'contract-only');
+      putRow.badgeLabel = 'PUT / ITM';
+      putRow.badgeTone = 'put-itm';
+      aboveRows.push(putRow);
     } else {
       aboveRows.push(buildInfoRow('No put options available at this strike', 'puts'));
     }
@@ -699,20 +659,46 @@ function DerivativesDashboard({
     if (!strikeList || strikeList.length === 0) {
       if (dynamicStrikeIndex !== null) {
         setDynamicStrikeIndex(null);
+        setIsStrikeLocked(false);
+        setLockedStrikeValue(null);
       }
       return;
     }
  
     const maxIndex = strikeList.length - 1;
-    const desiredIndex = dynamicStrikeIndex;
+    
+    // If strike is locked, try to find the locked strike value in the new strikeList
+    if (isStrikeLocked && lockedStrikeValue !== null) {
+      const foundIndex = strikeList.findIndex(strike => Number(strike) === Number(lockedStrikeValue));
+      if (foundIndex >= 0 && foundIndex <= maxIndex) {
+        // Strike value found in new list - update index to match
+        if (dynamicStrikeIndex !== foundIndex) {
+          setDynamicStrikeIndex(foundIndex);
+        }
+      } else {
+        // Locked strike value not found in new list - unlock and fall back to ATM
+        setIsStrikeLocked(false);
+        setLockedStrikeValue(null);
+        const fallbackIndex = (typeof atmIndex === 'number' && atmIndex >= 0 && atmIndex <= maxIndex)
+          ? atmIndex
+          : Math.max(0, Math.floor(strikeList.length / 2));
+        setDynamicStrikeIndex(fallbackIndex);
+      }
+      return; // Don't auto-update when locked
+    }
  
+    // Only auto-update if strike is not manually locked
+    // Use atmIndex to determine the limit/range, but only update if not locked
+    const desiredIndex = dynamicStrikeIndex;
     if (desiredIndex === null || desiredIndex < 0 || desiredIndex > maxIndex) {
       const fallbackIndex = (typeof atmIndex === 'number' && atmIndex >= 0 && atmIndex <= maxIndex)
         ? atmIndex
         : Math.max(0, Math.floor(strikeList.length / 2));
       setDynamicStrikeIndex(fallbackIndex);
     }
-  }, [strikeList, atmIndex, dynamicStrikeIndex]);
+    // Note: atmIndex changes with spot LTP, but we don't auto-update the selected strike
+    // when locked. The limit (strikeList) still depends on spot LTP via organizedData.
+  }, [strikeList, atmIndex, dynamicStrikeIndex, isStrikeLocked, lockedStrikeValue]);
  
   const dynamicStrikeTable = useMemo(() => {
     const strikes = strikeList || [];
@@ -725,7 +711,8 @@ function DerivativesDashboard({
         selectedStrike: null,
         strikeStep,
         firstStrike: null,
-        lastStrike: null
+        lastStrike: null,
+        strikes: []
       };
     }
 
@@ -765,6 +752,12 @@ function DerivativesDashboard({
       const rawBidQty = option?.bidQuantity != null ? Number(option.bidQuantity) : null;
       const rawAskQty = option?.askQuantity != null ? Number(option.askQuantity) : null;
 
+      // Calculate incremental volume (cumulative change over 5-minute window)
+      const contractKey = option?.instrumentToken || option?.tradingsymbol || null;
+      const incrementalVolData = contractKey && rawVol !== null 
+        ? updateIncrementalVolume(`${sectionType}:${contractKey}`, rawVol)
+        : { incrementalVol: 0, volumeChange: 0, displayValue: '-', rawValue: null };
+
       const formattedChange = rawChange != null ? `${rawChange > 0 ? '+' : ''}${formatPriceValue(rawChange)}` : '';
       const formattedPercent = rawChangePercent != null ? `${rawChangePercent > 0 ? '+' : ''}${Number(rawChangePercent).toFixed(2)}%` : '';
 
@@ -773,7 +766,7 @@ function DerivativesDashboard({
         badgeLabel: null,
         badgeTone: sectionType === 'calls' ? 'call' : 'put',
         sectionType,
-        contractKey: option?.instrumentToken || option?.tradingsymbol || null,
+        contractKey,
         instrumentToken: option?.instrumentToken,
         tradingsymbol: option?.tradingsymbol,
         strikePrice: option?.strikePrice,
@@ -785,8 +778,10 @@ function DerivativesDashboard({
         changePercentRaw: rawChangePercent,
         oi: rawOi != null ? formatIntegerValue(rawOi) : '',
         oiRaw: rawOi,
-        vol: rawVol != null ? formatIntegerValue(rawVol) : '',
-        volRaw: rawVol,
+        vol: incrementalVolData.displayValue,
+        volRaw: incrementalVolData.rawValue, // For coloring - incremental volume
+        volChange: incrementalVolData.volumeChange, // Change in this refresh
+        originalVol: rawVol, // Original API volume for tooltip
         bid: rawBid != null ? formatPriceValue(rawBid) : '',
         bidRaw: rawBid,
         ask: rawAsk != null ? formatPriceValue(rawAsk) : '',
@@ -895,7 +890,11 @@ function DerivativesDashboard({
 
       if (option) {
         const row = dynamicOptionRow(option, sectionType);
-        if (row) rows.push(row);
+        if (row) {
+          row.badgeLabel = label;
+          row.badgeTone = toneMap[label] || (sectionType === 'calls' ? 'call' : 'put');
+          rows.push(row);
+        }
       } else {
         pushInfoRow('No contract available', sectionType);
       }
@@ -909,7 +908,8 @@ function DerivativesDashboard({
       selectedStrike,
       strikeStep,
       firstStrike: strikes[0],
-      lastStrike: strikes[maxIndex]
+      lastStrike: strikes[maxIndex],
+      strikes // Expose strikes array for slider handler
     };
   }, [strikeList, dynamicStrikeIndex, atmIndex, strikeStep, callsForExpiry, putsForExpiry]);
 
@@ -925,7 +925,13 @@ function DerivativesDashboard({
           max={dynamicStrikeTable.sliderMax}
           step={1}
           value={dynamicStrikeTable.sliderIndex}
-          onChange={(event) => setDynamicStrikeIndex(Number(event.target.value))}
+          onChange={(event) => {
+            const newIndex = Number(event.target.value);
+            const newStrikeValue = dynamicStrikeTable.strikes?.[newIndex] ?? null;
+            setDynamicStrikeIndex(newIndex);
+            setIsStrikeLocked(true); // Lock the strike when manually changed
+            setLockedStrikeValue(newStrikeValue); // Store the actual strike value
+          }}
           className="w-44 sm:w-56 accent-violet-500"
         />
         <span className="text-[11px] text-gray-400">{formatStrikeValue(dynamicStrikeTable.lastStrike)}</span>
@@ -956,8 +962,18 @@ function DerivativesDashboard({
     return sections;
   }, [minusOneTable, plusOneTable, dynamicStrikeTable.rows, dynamicSliderControl]);
 
+  const totalContracts = derivativesData?.totalContracts ?? 0;
+  const colorCacheSize = useMemo(() => {
+    const baseline = totalContracts > 0 ? totalContracts + 40 : 120;
+    return Math.max(60, Math.min(baseline, 200));
+  }, [totalContracts]);
+
   if (!derivativesData) {
-    return <div className="p-4 text-center">Loading derivatives data...</div>;
+    return (
+      <div className="p-4 text-center">
+        {loading ? 'Loading derivatives data...' : 'No derivatives data available'}
+      </div>
+    );
   }
 
   if (!activeFuturesContract) {
@@ -965,12 +981,12 @@ function DerivativesDashboard({
   }
 
   return (
-    <ContractColorProvider>
+    <ContractColorProvider maxSize={colorCacheSize}>
       <div className="space-y-6">
         {/* Data Source Indicator */}
         {(derivativesData.dataSource || targetExpiry) && (
           <div className="relative flex justify-center">
-            <div className="space-y-1 text-xs text-gray-500 dark:text-gray-400 text-center">
+            <div className={`space-y-1 text-xs text-center ${isDarkMode ? 'text-slate-300' : 'text-gray-500'}`}>
               {derivativesData.dataSource && (
                 <div>Data Source: {derivativesData.dataSource} | Total Contracts: {derivativesData.totalContracts}</div>
               )}
@@ -1003,6 +1019,7 @@ function DerivativesDashboard({
           organizedData={mainTable}
           fullscreenSections={fullscreenSections}
           connectionWarning={connectionWarning}
+          derivativesData={derivativesData}
         />
         
         {/* Below Spot Table - ITM Calls & OTM Puts */}
@@ -1043,18 +1060,3 @@ function DerivativesDashboard({
 }
 
 export default DerivativesDashboard;
-
-function deriveConnectionErrorMessage(error) {
-  if (!error) return 'Unknown error';
-  if (error.response) {
-    const { status } = error.response;
-    if (status === 429) return 'Zerodha API rate limit reached. Pausing updates briefly.';
-    if (status === 401) return 'Session expired with Zerodha. Please login again to resume live data.';
-    if (status >= 500) return 'Zerodha API reported a server error. Waiting for recovery.';
-    return `Zerodha API responded with status ${status}. Retrying shortly.`;
-  }
-  if (error.request) {
-    return 'Network interruption detected. Trying to reconnect to the Zerodha feed.';
-  }
-  return error.message || 'Unexpected error contacting Zerodha API.';
-}

@@ -4,18 +4,27 @@ import com.zerodha.dashboard.adapter.BreezeApiAdapter;
 import com.zerodha.dashboard.adapter.ZerodhaApiAdapter;
 import com.zerodha.dashboard.model.DerivativesChain;
 import com.zerodha.dashboard.model.DerivativeContract;
+import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Size;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.math.BigDecimal;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.regex.Pattern;
+import org.springframework.util.StringUtils;
 
 /**
  * Controller for strike price monitoring endpoints
@@ -23,22 +32,27 @@ import java.util.Optional;
  */
 @RestController
 @RequestMapping("/api/strike-monitoring")
-@CrossOrigin(origins = {"http://localhost:5173", "http://localhost:5174"})
+@Validated
 public class StrikePriceMonitoringController {
-    
+
+    private static final Pattern UNDERLYING_PATTERN = Pattern.compile("^[A-Z0-9_-]{1,15}$");
+
     private static final Logger log = LoggerFactory.getLogger(StrikePriceMonitoringController.class);
-    
-    @Autowired
-    private BreezeApiAdapter breezeApiAdapter;
-    
-    @Autowired
-    private ZerodhaApiAdapter zerodhaApiAdapter;
-    
+
+    private final BreezeApiAdapter breezeApiAdapter;
+    private final ZerodhaApiAdapter zerodhaApiAdapter;
+
     @Value("${breeze.api.enabled:true}")
     private boolean breezeApiEnabled;
-    
+
     @Value("${zerodha.enabled:false}")
     private boolean zerodhaEnabled;
+
+    public StrikePriceMonitoringController(BreezeApiAdapter breezeApiAdapter,
+                                           ZerodhaApiAdapter zerodhaApiAdapter) {
+        this.breezeApiAdapter = breezeApiAdapter;
+        this.zerodhaApiAdapter = zerodhaApiAdapter;
+    }
     
     /**
      * Get strike price monitoring data
@@ -46,23 +60,18 @@ public class StrikePriceMonitoringController {
      */
     @GetMapping
     public ResponseEntity<?> getStrikePriceMonitoring(
-            @RequestParam(defaultValue = "NIFTY") String underlying,
-            @RequestParam(defaultValue = "25000") BigDecimal spot) {
+            @RequestParam(defaultValue = "NIFTY") @Size(min = 1, max = 15) String underlying,
+            @RequestParam(defaultValue = "25000") @Positive BigDecimal spot) {
         
-        log.info("Strike price monitoring request: underlying={}, spot={}", underlying, spot);
+        String normalizedUnderlying = sanitizeUnderlying(underlying);
+        if (normalizedUnderlying == null) {
+            return invalidUnderlyingResponse();
+        }
+
+        log.info("Strike price monitoring request: underlying={}, spot={}", normalizedUnderlying, spot);
         
         try {
-            Optional<DerivativesChain> chainOpt = Optional.empty();
-            
-            // Try Breeze API first if enabled
-            if (breezeApiEnabled) {
-                chainOpt = breezeApiAdapter.getDerivativesChain(underlying);
-            }
-            
-            // Fallback to Zerodha API if Breeze API is disabled or failed
-            if (chainOpt.isEmpty() && zerodhaEnabled) {
-                chainOpt = zerodhaApiAdapter.getDerivativesChain(underlying);
-            }
+            Optional<DerivativesChain> chainOpt = loadChain(normalizedUnderlying);
             
             if (chainOpt.isEmpty()) {
                 return ResponseEntity.notFound().build();
@@ -95,23 +104,18 @@ public class StrikePriceMonitoringController {
      */
     @GetMapping("/above")
     public ResponseEntity<?> getAboveStrikePrice(
-            @RequestParam(defaultValue = "NIFTY") String underlying,
-            @RequestParam(defaultValue = "25000") BigDecimal spot) {
+            @RequestParam(defaultValue = "NIFTY") @Size(min = 1, max = 15) String underlying,
+            @RequestParam(defaultValue = "25000") @Positive BigDecimal spot) {
         
-        log.info("Above strike price request: underlying={}, spot={}", underlying, spot);
+        String normalizedUnderlying = sanitizeUnderlying(underlying);
+        if (normalizedUnderlying == null) {
+            return invalidUnderlyingResponse();
+        }
+
+        log.info("Above strike price request: underlying={}, spot={}", normalizedUnderlying, spot);
         
         try {
-            Optional<DerivativesChain> chainOpt = Optional.empty();
-            
-            // Try Breeze API first if enabled
-            if (breezeApiEnabled) {
-                chainOpt = breezeApiAdapter.getDerivativesChain(underlying);
-            }
-            
-            // Fallback to Zerodha API if Breeze API is disabled or failed
-            if (chainOpt.isEmpty() && zerodhaEnabled) {
-                chainOpt = zerodhaApiAdapter.getDerivativesChain(underlying);
-            }
+            Optional<DerivativesChain> chainOpt = loadChain(normalizedUnderlying);
             
             if (chainOpt.isEmpty()) {
                 return ResponseEntity.notFound().build();
@@ -134,23 +138,18 @@ public class StrikePriceMonitoringController {
      */
     @GetMapping("/below")
     public ResponseEntity<?> getBelowStrikePrice(
-            @RequestParam(defaultValue = "NIFTY") String underlying,
-            @RequestParam(defaultValue = "25000") BigDecimal spot) {
+            @RequestParam(defaultValue = "NIFTY") @Size(min = 1, max = 15) String underlying,
+            @RequestParam(defaultValue = "25000") @Positive BigDecimal spot) {
         
-        log.info("Below strike price request: underlying={}, spot={}", underlying, spot);
+        String normalizedUnderlying = sanitizeUnderlying(underlying);
+        if (normalizedUnderlying == null) {
+            return invalidUnderlyingResponse();
+        }
+
+        log.info("Below strike price request: underlying={}, spot={}", normalizedUnderlying, spot);
         
         try {
-            Optional<DerivativesChain> chainOpt = Optional.empty();
-            
-            // Try Breeze API first if enabled
-            if (breezeApiEnabled) {
-                chainOpt = breezeApiAdapter.getDerivativesChain(underlying);
-            }
-            
-            // Fallback to Zerodha API if Breeze API is disabled or failed
-            if (chainOpt.isEmpty() && zerodhaEnabled) {
-                chainOpt = zerodhaApiAdapter.getDerivativesChain(underlying);
-            }
+            Optional<DerivativesChain> chainOpt = loadChain(normalizedUnderlying);
             
             if (chainOpt.isEmpty()) {
                 return ResponseEntity.notFound().build();
@@ -166,5 +165,36 @@ public class StrikePriceMonitoringController {
             log.error("Error fetching below strike price data", e);
             return ResponseEntity.internalServerError().body("Error fetching below strike price data");
         }
+    }
+
+    private Optional<DerivativesChain> loadChain(String normalizedUnderlying) {
+        Optional<DerivativesChain> chainOpt = Optional.empty();
+
+        if (breezeApiEnabled) {
+            chainOpt = breezeApiAdapter.getDerivativesChain(normalizedUnderlying);
+        }
+        
+        if (chainOpt.isEmpty() && zerodhaEnabled) {
+            chainOpt = zerodhaApiAdapter.getDerivativesChain(normalizedUnderlying);
+        }
+        return chainOpt;
+    }
+
+    private String sanitizeUnderlying(String rawUnderlying) {
+        if (!StringUtils.hasText(rawUnderlying)) {
+            return null;
+        }
+        String normalized = URLDecoder.decode(rawUnderlying, StandardCharsets.UTF_8).trim().toUpperCase();
+        if (!UNDERLYING_PATTERN.matcher(normalized).matches()) {
+            return null;
+        }
+        return normalized;
+    }
+
+    private ResponseEntity<Map<String, String>> invalidUnderlyingResponse() {
+        Map<String, String> body = new HashMap<>();
+        body.put("error", "INVALID_UNDERLYING");
+        body.put("message", "Underlying must be 1-15 characters (A-Z, 0-9, hyphen or underscore)");
+        return ResponseEntity.badRequest().body(body);
     }
 }

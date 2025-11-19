@@ -1,8 +1,25 @@
 @import "tailwindcss";
 
+/* Ensure base elements fill viewport */
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  box-sizing: border-box;
+}
+
 body {
   background-color: #ffffff;
   color: #1e293b;
+}
+
+:root {
+  color-scheme: light;
+  --real-vh: 100vh; /* Fallback if JS hasn't set it yet */
+}
+
+.dark {
+  color-scheme: dark;
 }
 
 table {
@@ -297,61 +314,125 @@ th, td {
     border-color: rgba(124, 58, 237, 0.45);
   }
 
+  /* Green palette for upward movements - using provided 10-color palette */
+  /* Very Soft: lightest shade (#93f5ab) */
+  .cell-bg-up-very-soft {
+    background-color: #93f5ab;
+  }
+
+  /* Soft: second lightest (#72f292) */
   .cell-bg-up-soft {
-    background-color: rgba(34, 197, 94, 0.14);
+    background-color: #72f292;
   }
 
+  /* Medium: mid shades (#51ef79, #30ed5f) */
   .cell-bg-up-medium {
-    background-color: rgba(22, 163, 74, 0.22);
+    background-color: #30ed5f;
   }
 
+  /* Strong: darker shades (#13e548, #11c53e) */
   .cell-bg-up-strong {
-    background-color: rgba(21, 128, 61, 0.32);
+    background-color: #11c53e;
   }
 
+  /* Very Strong: darkest shades (#0ea433, #0b8329, #08621f, #054114) */
+  .cell-bg-up-very-strong {
+    background-color: #0b8329;
+  }
+
+  /* Red palette for downward movements - using provided 10-color palette */
+  /* Very Soft: lightest shade (#f69292) */
+  .cell-bg-down-very-soft {
+    background-color: #f69292;
+  }
+
+  /* Soft: second lightest (#f47070) */
   .cell-bg-down-soft {
-    background-color: rgba(248, 113, 113, 0.14);
+    background-color: #f47070;
   }
 
+  /* Medium: mid shades (#f14f4f, #ee2e2e) */
   .cell-bg-down-medium {
-    background-color: rgba(239, 68, 68, 0.22);
+    background-color: #ee2e2e;
   }
 
+  /* Strong: darker shades (#e71111, #c60f0f) */
   .cell-bg-down-strong {
-    background-color: rgba(185, 28, 28, 0.32);
+    background-color: #c60f0f;
+  }
+
+  /* Very Strong: darkest shades (#a50c0c, #840a0a, #630707, #420505) */
+  .cell-bg-down-very-strong {
+    background-color: #840a0a;
+  }
+
+  /* Dark mode - use slightly brighter shades for better visibility */
+  .dark .cell-bg-up-very-soft {
+    background-color: #72f292;
   }
 
   .dark .cell-bg-up-soft {
-    background-color: rgba(34, 197, 94, 0.22);
+    background-color: #51ef79;
   }
 
   .dark .cell-bg-up-medium {
-    background-color: rgba(21, 128, 61, 0.30);
+    background-color: #13e548;
   }
 
   .dark .cell-bg-up-strong {
-    background-color: rgba(21, 128, 61, 0.42);
+    background-color: #0ea433;
+  }
+
+  .dark .cell-bg-up-very-strong {
+    background-color: #08621f;
+  }
+
+  .dark .cell-bg-down-very-soft {
+    background-color: #f47070;
   }
 
   .dark .cell-bg-down-soft {
-    background-color: rgba(248, 113, 113, 0.22);
+    background-color: #f14f4f;
   }
 
   .dark .cell-bg-down-medium {
-    background-color: rgba(239, 68, 68, 0.30);
+    background-color: #e71111;
   }
 
   .dark .cell-bg-down-strong {
-    background-color: rgba(153, 27, 27, 0.42);
+    background-color: #a50c0c;
   }
 
+  .dark .cell-bg-down-very-strong {
+    background-color: #630707;
+  }
+
+  /* Halo effects using palette colors */
   .cell-halo-max {
-    box-shadow: inset 0 0 0 2px rgba(34, 197, 94, 0.45);
+    box-shadow: inset 0 0 0 2px #11c53e;
   }
 
   .cell-halo-min {
-    box-shadow: inset 0 0 0 2px rgba(248, 113, 113, 0.45);
+    box-shadow: inset 0 0 0 2px #c60f0f;
   }
+
+/* Subtle halo border for tables - complements blue-purple theme */
+.table-halo-border {
+  box-shadow: 
+    0 0 0 1px rgba(59, 130, 246, 0.15),
+    0 0 0 1px rgba(168, 85, 247, 0.15),
+    0 0 8px rgba(59, 130, 246, 0.08),
+    0 0 12px rgba(168, 85, 247, 0.08);
+}
+
+/* Enhanced halo border for NIFTY DERIVATIVES table - 20% more visible than regular */
+.table-halo-border-strong {
+  box-shadow: 
+    0 0 0 1px rgba(59, 130, 246, 0.35),
+    0 0 0 1px rgba(168, 85, 247, 0.35),
+    0 0 8px rgba(59, 130, 246, 0.28),
+    0 0 12px rgba(168, 85, 247, 0.28);
+}
 
   /* Dark mode styles */
   .dark {
@@ -421,3 +502,181 @@ th, td {
     color: #94a3b8;
     border-left: 3px solid #22d3ee;
   }
+
+  /* Custom scrollbar for refresh rate selector */
+  .refresh-rate-selector {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 #f1f5f9;
+  }
+
+  .dark .refresh-rate-selector {
+    scrollbar-color: #475569 #1e293b;
+  }
+
+  .refresh-rate-selector::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .refresh-rate-selector::-webkit-scrollbar-track {
+    background: #f1f5f9;
+    border-radius: 4px;
+  }
+
+  .dark .refresh-rate-selector::-webkit-scrollbar-track {
+    background: #1e293b;
+  }
+
+  .refresh-rate-selector::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 4px;
+  }
+
+  .refresh-rate-selector::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+  }
+
+  .dark .refresh-rate-selector::-webkit-scrollbar-thumb {
+    background: #475569;
+  }
+
+  .dark .refresh-rate-selector::-webkit-scrollbar-thumb:hover {
+    background: #64748b;
+  }
+
+/* Use real viewport height instead of 100vh */
+.fullscreen-container {
+  height: var(--real-vh, 100vh);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Make table fit without scrolling - optimized for 125% scale */
+.table-wrapper {
+  flex: 1;
+  overflow: hidden; /* No scrolling - content must fit */
+  padding: 0.125rem 0.25rem !important; /* Minimal padding for fullscreen */
+  display: flex;
+  flex-direction: column;
+  min-height: 0; /* Allow flex shrinking */
+  max-height: 100%; /* Ensure it doesn't exceed container */
+}
+
+/* Ensure table fits within viewport - no scrolling */
+.table-wrapper > table {
+  height: 100%;
+  display: table;
+  table-layout: fixed;
+}
+
+/* Fullscreen table styling - optimized for 125% scale */
+.fullscreen-table {
+  display: table;
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+.fullscreen-table thead th {
+  padding: 1px 3px !important; /* Reduced header padding */
+  font-size: 0.65rem !important; /* 10.4px base, becomes ~13px at 125% scale */
+  line-height: 1.1 !important;
+  font-weight: 700 !important; /* Bold header */
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  vertical-align: middle;
+}
+
+/* Segment header - keep smaller */
+.fullscreen-table thead th:first-child {
+  font-size: 0.55rem !important; /* Keep segment header smaller */
+  font-weight: 600 !important;
+}
+
+.fullscreen-table td,
+.fullscreen-table th {
+  padding: 0.5px 2px !important; /* Minimized padding to fit 18px font */
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  font-size: 0.9rem !important; /* 14.4px base, becomes 18px at 125% scale */
+  font-weight: 700 !important; /* Bolder for better visibility */
+  line-height: 1.05 !important; /* Tighter line height to prevent overflow */
+  vertical-align: middle;
+}
+
+/* Segment column - smaller font size to save space */
+.fullscreen-table td:first-child,
+.fullscreen-table th:first-child {
+  font-size: 0.5rem !important; /* 8px base, becomes ~10px at 125% scale - smaller */
+  font-weight: 500 !important; /* Normal weight for segment column */
+  padding: 0.5px 1.5px !important; /* Reduced horizontal padding */
+}
+
+/* Triple the row height for futures rows in fullscreen - DO NOT CHANGE */
+.fullscreen-table tbody tr[data-row-type="futures"] td {
+  padding: 4px 3px !important; /* Keep futures row padding unchanged */
+}
+
+/* Ensure futures rows also have bolder text (except segment) - DO NOT CHANGE */
+.fullscreen-table tbody tr[data-row-type="futures"] td:not(:first-child) {
+  font-weight: 700 !important; /* Bolder */
+}
+
+/* Section header rows - reduce height */
+.fullscreen-table td[colspan] {
+  padding: 0.2rem 0.3rem !important; /* Further reduced */
+  font-size: 0.5rem !important; /* 8px base, becomes ~10px at 125% scale */
+  line-height: 1.1 !important;
+}
+
+/* Reduce header padding in fullscreen - optimized for 125% scale */
+.fullscreen-container .flex-shrink-0 {
+  padding: 0.375rem 0.75rem !important; /* Reduced header padding */
+}
+
+.fullscreen-container h1 {
+  font-size: 1rem !important; /* Smaller title for 125% scale */
+  line-height: 1.15 !important;
+}
+
+/* Reduce header text sizes - optimized for 125% scale */
+.fullscreen-container p,
+.fullscreen-container span {
+  font-size: 0.65rem !important; /* ~10.4px base, becomes ~13px at 125% scale */
+}
+
+.fullscreen-container button {
+  padding: 0.5rem !important; /* Smaller buttons */
+}
+
+.fullscreen-container svg {
+  width: 1.25rem !important; /* 20px icons */
+  height: 1.25rem !important;
+}
+
+/* Reduce gaps in header */
+.fullscreen-container .gap-4 {
+  gap: 0.5rem !important;
+}
+
+.fullscreen-container .gap-3 {
+  gap: 0.375rem !important;
+}
+
+.fullscreen-container .gap-2 {
+  gap: 0.25rem !important;
+}
+
+/* Reduce section header padding - optimized for 125% scale */
+.fullscreen-table td[colspan] {
+  padding: 0.25rem 0.375rem !important; /* Smaller section headers */
+  font-size: 0.5rem !important; /* 8px base, becomes ~10px at 125% scale */
+  line-height: 1.1 !important;
+}
+
+/* Reduce gap in section header flex */
+.fullscreen-table td[colspan] .flex {
+  gap: 0.25rem !important;
+}

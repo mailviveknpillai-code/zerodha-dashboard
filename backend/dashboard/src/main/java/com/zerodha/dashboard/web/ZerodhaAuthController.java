@@ -6,6 +6,7 @@ import com.zerodha.dashboard.service.ZerodhaSessionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.StringUtils;
@@ -63,7 +64,7 @@ public class ZerodhaAuthController {
      * This URL cannot be changed once registered with Zerodha, so use a permanent domain.
      */
     @GetMapping("/callback")
-    public ResponseEntity<Map<String, Object>> handleCallback(
+    public ResponseEntity<?> handleCallback(
             @RequestParam(value = "request_token", required = false) String requestToken,
             @RequestParam(value = "action", required = false) String action,
             @RequestParam(value = "status", required = false) String status,
@@ -73,33 +74,17 @@ public class ZerodhaAuthController {
                 requestToken != null ? "present" : "null", action, status, error);
         
         if (!zerodhaEnabled) {
-            return ResponseEntity.badRequest()
-                    .body(Map.of(
-                            "success", false,
-                            "message", "Zerodha API is disabled",
-                            "redirect_url", "/dashboard?error=zerodha_disabled"
-                    ));
+            return redirectToClient("/dashboard?error=zerodha_disabled");
         }
         
         if (error != null) {
             log.error("Zerodha Kite OAuth error: {}", error);
-            return ResponseEntity.badRequest()
-                    .body(Map.of(
-                            "success", false,
-                            "error", error,
-                            "status", status != null ? status : "unknown",
-                            "redirect_url", "/dashboard?error=oauth_failed"
-                    ));
+            return redirectToClient("/dashboard?error=oauth_failed&message=" + urlEncode(error));
         }
         
         if (requestToken == null || requestToken.isEmpty()) {
             log.warn("Zerodha Kite OAuth callback received without request token");
-            return ResponseEntity.badRequest()
-                    .body(Map.of(
-                            "success", false,
-                            "message", "No request token received",
-                            "redirect_url", "/dashboard?error=no_token"
-                    ));
+            return redirectToClient("/dashboard?error=no_token");
         }
         
         try {
@@ -130,36 +115,16 @@ public class ZerodhaAuthController {
                 zerodhaSessionService.saveSession(sessionPayload);
                 log.info("Successfully exchanged request token for access token");
                 
-                return ResponseEntity.ok(Map.of(
-                        "success", true,
-                        "message", "OAuth authentication successful",
-                        "access_token", accessToken,
-                        "session_cached", true,
-                        "action", action != null ? action : "none",
-                        "status", status != null ? status : "success",
-                        "redirect_url", "/dashboard?success=oauth_success&access_token=" + accessToken
-                ));
+                return redirectToClient("/dashboard?success=oauth_success");
             } else {
                 String errorMsg = (String) tokenExchangeResult.getOrDefault("error", "Failed to exchange token");
                 log.error("Failed to exchange request token: {}", errorMsg);
-                return ResponseEntity.badRequest()
-                        .body(Map.of(
-                                "success", false,
-                                "message", "Failed to exchange request token for access token",
-                                "error", errorMsg,
-                                "redirect_url", "/dashboard?error=token_exchange_failed"
-                        ));
+                return redirectToClient("/dashboard?error=token_exchange_failed&message=" + urlEncode(errorMsg));
             }
             
         } catch (Exception e) {
             log.error("Error processing Zerodha Kite OAuth callback: {}", e.getMessage(), e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of(
-                            "success", false,
-                            "message", "Error processing OAuth callback",
-                            "error", e.getMessage(),
-                            "redirect_url", "/dashboard?error=processing_failed"
-                    ));
+            return redirectToClient("/dashboard?error=processing_failed&message=" + urlEncode(e.getMessage()));
         }
     }
     
@@ -360,10 +325,13 @@ public class ZerodhaAuthController {
      */
     @GetMapping("/session")
     public ResponseEntity<Map<String, Object>> getSession() {
+        boolean active = zerodhaSessionService.hasActiveAccessToken();
         Map<String, Object> response = new HashMap<>();
         Map<String, String> snapshot = zerodhaSessionService.getSessionSnapshot();
 
-        response.put("active", zerodhaSessionService.hasActiveAccessToken());
+        response.put("active", active);
+        response.put("status", active ? "ACTIVE" : "INACTIVE");
+        response.put("session_cached", active);
         if (!snapshot.isEmpty()) {
             response.put("user_id", snapshot.getOrDefault("user_id", null));
             response.put("user_name", snapshot.getOrDefault("user_name", null));
@@ -397,5 +365,40 @@ public class ZerodhaAuthController {
         }
 
         return "http://localhost:9000/api/zerodha/callback";
+    }
+
+    private ResponseEntity<?> redirectToClient(String path) {
+        String target = resolveRedirectTarget(path);
+        return ResponseEntity.status(HttpStatus.FOUND)
+                .header(HttpHeaders.LOCATION, target)
+                .build();
+    }
+
+    private String resolveRedirectTarget(String path) {
+        if (!StringUtils.hasText(path)) {
+            return publicTunnelUrlIfPresent("/dashboard");
+        }
+        if (path.startsWith("http://") || path.startsWith("https://")) {
+            return path;
+        }
+        return publicTunnelUrlIfPresent(path);
+    }
+
+    private String publicTunnelUrlIfPresent(String path) {
+        if (!StringUtils.hasText(publicTunnelUrl)) {
+            return path;
+        }
+        String base = publicTunnelUrl.endsWith("/") ? publicTunnelUrl.substring(0, publicTunnelUrl.length() - 1) : publicTunnelUrl;
+        if (path.startsWith("/")) {
+            return base + path;
+        }
+        return base + "/" + path;
+    }
+
+    private String urlEncode(String value) {
+        if (!StringUtils.hasText(value)) {
+            return "";
+        }
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 }

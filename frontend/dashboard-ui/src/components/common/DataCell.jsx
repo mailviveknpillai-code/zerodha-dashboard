@@ -1,19 +1,29 @@
 import React from 'react';
 import { useContractColoring } from '../../contexts/ContractColorContext';
-
-const BASE_CLASSES = 'border-r border-slate-200/60 dark:border-slate-700/50 last:border-r-0';
+import { useTheme } from '../../contexts/ThemeContext';
 
 const DataCell = ({
   value,
   className = '',
   displayValue,
   coloringMeta = null,
+  title = null,
 }) => {
+  const { isDarkMode } = useTheme();
   const { backgroundClass, haloClass } = useContractColoring(coloringMeta, value);
-  const composedClassName = [BASE_CLASSES, className, backgroundClass, haloClass].filter(Boolean).join(' ');
+
+  const baseClasses = [
+    'border-r',
+    'last:border-r-0',
+    isDarkMode ? 'border-slate-700/50' : 'border-slate-200/60',
+  ];
+
+  const composedClassName = [...baseClasses, className, backgroundClass, haloClass]
+    .filter(Boolean)
+    .join(' ');
 
   return (
-    <td className={composedClassName}>
+    <td className={composedClassName} title={title || undefined}>
       {displayValue ?? (value ?? '')}
     </td>
   );

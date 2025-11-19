@@ -2,8 +2,9 @@ import React, { createContext, useCallback, useContext, useMemo, useRef, useStat
 
 const ContractColorContext = createContext(null);
 
-const MAX_CACHE_DEFAULT = 10;
-const MIN_CACHE_DEFAULT = 7;
+const DEFAULT_CACHE_SIZE = 120;
+const MIN_CACHE_SIZE = 50;
+const MAX_CACHE_SIZE = 240;
 
 const sanitizeNumber = (value) => {
   if (value === null || value === undefined) return null;
@@ -20,18 +21,19 @@ const sanitizeNumber = (value) => {
 };
 
 const FIELD_CONFIG = {
-  ltp: { thresholds: [0.05, 0.25, 0.75], minimumDenominator: 1 },
-  change: { thresholds: [0.05, 0.25, 0.75], minimumDenominator: 1 },
-  changePercent: { thresholds: [0.05, 0.25, 0.75], minimumDenominator: 0.5 },
-  oi: { thresholds: [0.02, 0.1, 0.3], minimumDenominator: 100 },
-  vol: { thresholds: [0.02, 0.1, 0.3], minimumDenominator: 100 },
-  bid: { thresholds: [0.05, 0.25, 0.75], minimumDenominator: 1 },
-  ask: { thresholds: [0.05, 0.25, 0.75], minimumDenominator: 1 },
-  bidQty: { thresholds: [0.5, 1.5, 3], minimumDenominator: 10 },
-  askQty: { thresholds: [0.5, 1.5, 3], minimumDenominator: 10 },
+  ltp: { thresholds: [0.2, 0.8, 1.6], minimumDenominator: 1 },
+  change: { thresholds: [0.2, 0.8, 1.6], minimumDenominator: 1 },
+  changePercent: { thresholds: [0.4, 1.2, 2.5], minimumDenominator: 0.25 },
+  oi: { thresholds: [1.5, 4, 9], minimumDenominator: 500 },
+  vol: { thresholds: [5, 15, 40], minimumDenominator: 1000 }, // Adjusted for volume change magnitudes
+  bid: { thresholds: [0.25, 0.9, 1.8], minimumDenominator: 1 },
+  ask: { thresholds: [0.25, 0.9, 1.8], minimumDenominator: 1 },
+  bidQty: { thresholds: [12, 35, 80], minimumDenominator: 50 },
+  askQty: { thresholds: [12, 35, 80], minimumDenominator: 50 },
+  deltaBA: { thresholds: [12, 35, 80], minimumDenominator: 50 },
 };
 
-const DEFAULT_CONFIG = { thresholds: [0.05, 0.25, 0.75], minimumDenominator: 1 };
+const DEFAULT_CONFIG = { thresholds: [0.3, 1, 2.5], minimumDenominator: 1 };
 
 const computePercentChange = (previous, current, config) => {
   if (previous === null || previous === undefined) return null;
@@ -52,10 +54,14 @@ const evaluateIntensity = (percentChange, thresholds) => {
   }
 
   const absValue = Math.abs(percentChange);
+  // Use 5 intensity levels to better utilize the 10-color palette
+  // Map to: very-soft, soft, medium, strong, very-strong
+  if (absValue >= thresholds[2] * 1.5) return 'very-strong';
   if (absValue >= thresholds[2]) return 'strong';
   if (absValue >= thresholds[1]) return 'medium';
-  // Any non-zero movement should still tint softly
-  return 'soft';
+  if (absValue >= thresholds[0]) return 'soft';
+  // Very small movements
+  return 'very-soft';
 };
 
 const toBackgroundClass = (direction, intensity) => {
@@ -68,10 +74,17 @@ const toHaloClass = (direction) => {
   return direction === 'up' ? 'cell-halo-max' : 'cell-halo-min';
 };
 
-export function ContractColorProvider({ children, maxSize = MAX_CACHE_DEFAULT }) {
-  const effectiveLimit = Math.max(MIN_CACHE_DEFAULT, Math.min(maxSize, MAX_CACHE_DEFAULT));
+export function ContractColorProvider({ children, maxSize = DEFAULT_CACHE_SIZE }) {
+  const effectiveLimit = useMemo(() => {
+    const requested = Number.isFinite(maxSize) ? maxSize : DEFAULT_CACHE_SIZE;
+    return Math.max(MIN_CACHE_SIZE, Math.min(requested, MAX_CACHE_SIZE));
+  }, [maxSize]);
   const cacheRef = useRef(new Map());
   const orderRef = useRef([]);
+  
+  // Separate cache for OI values and delta OI (independent of color coding)
+  const oiCacheRef = useRef(new Map()); // contractId -> { oi: number, deltaOi: number }
+  const oiOrderRef = useRef([]);
 
   const touchKey = useCallback((contractId) => {
     const currentOrder = orderRef.current;
@@ -85,7 +98,7 @@ export function ContractColorProvider({ children, maxSize = MAX_CACHE_DEFAULT })
   const evictIfNeeded = useCallback(() => {
     const cache = cacheRef.current;
     const currentOrder = orderRef.current;
-    while (cache.size > effectiveLimit) {
+    while (cache.size > effectiveLimit && currentOrder.length) {
       const oldestKey = currentOrder.shift();
       if (oldestKey !== undefined) {
         cache.delete(oldestKey);
@@ -145,9 +158,94 @@ export function ContractColorProvider({ children, maxSize = MAX_CACHE_DEFAULT })
     return { backgroundClass, haloClass };
   }, [touchKey, evictIfNeeded]);
 
+  const getPreviousValue = useCallback((contractId, fieldKey) => {
+    if (!contractId || !fieldKey) return null;
+    const cache = cacheRef.current;
+    const state = cache.get(contractId);
+    if (!state || !state.fields[fieldKey]) return null;
+    return state.fields[fieldKey].value ?? null;
+  }, []);
+
+  const getDeltaValue = useCallback((contractId, fieldKey) => {
+    if (!contractId || !fieldKey) return null;
+    const cache = cacheRef.current;
+    const state = cache.get(contractId);
+    if (!state || !state.fields[fieldKey]) return null;
+    return state.fields[fieldKey].deltaValue ?? null;
+  }, []);
+
+  // Separate OI cache management - only updates if OI value actually changes
+  const updateOiCache = useCallback((contractId, newOi) => {
+    if (!contractId || newOi === null || newOi === undefined) {
+      return null; // Return null if no valid data
+    }
+
+    const oiCache = oiCacheRef.current;
+    const oiOrder = oiOrderRef.current;
+    
+    // Sanitize the new OI value
+    const sanitizedOi = sanitizeNumber(newOi);
+    if (sanitizedOi === null) {
+      return null;
+    }
+
+    let oiEntry = oiCache.get(contractId);
+    
+    if (!oiEntry) {
+      // First time seeing this contract - initialize cache
+      oiEntry = { oi: sanitizedOi, deltaOi: null };
+      oiCache.set(contractId, oiEntry);
+      oiOrder.push(contractId);
+      
+      // Evict if needed
+      while (oiCache.size > effectiveLimit && oiOrder.length) {
+        const oldestKey = oiOrder.shift();
+        if (oldestKey !== undefined) {
+          oiCache.delete(oldestKey);
+        }
+      }
+      
+      return null; // No delta on first appearance
+    }
+
+    // Check if OI value has changed
+    const cachedOi = oiEntry.oi;
+    if (cachedOi === sanitizedOi) {
+      // OI unchanged - return cached delta OI
+      return oiEntry.deltaOi;
+    }
+
+    // OI changed - calculate new delta and update cache
+    const previousOi = cachedOi;
+    const newDeltaOi = sanitizedOi - previousOi;
+    
+    // Update cache with new OI and new delta
+    oiEntry.oi = sanitizedOi;
+    oiEntry.deltaOi = newDeltaOi;
+    
+    // Update order (move to end)
+    const existingIndex = oiOrder.indexOf(contractId);
+    if (existingIndex !== -1) {
+      oiOrder.splice(existingIndex, 1);
+    }
+    oiOrder.push(contractId);
+    
+    return newDeltaOi;
+  }, [effectiveLimit]);
+
+  const getCachedDeltaOi = useCallback((contractId) => {
+    if (!contractId) return null;
+    const oiEntry = oiCacheRef.current.get(contractId);
+    return oiEntry?.deltaOi ?? null;
+  }, []);
+
   const contextValue = useMemo(() => ({
     evaluateCell,
-  }), [evaluateCell]);
+    getPreviousValue,
+    getDeltaValue,
+    updateOiCache,
+    getCachedDeltaOi,
+  }), [evaluateCell, getPreviousValue, getDeltaValue, updateOiCache, getCachedDeltaOi]);
 
   return (
     <ContractColorContext.Provider value={contextValue}>

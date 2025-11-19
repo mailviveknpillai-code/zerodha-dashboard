@@ -1,5 +1,6 @@
 import React from 'react';
 import ContractSelector from './ContractSelector';
+import { useTheme } from '../contexts/ThemeContext';
 
 const favorites = [
   { symbol: 'NIFTY', status: 'Active' },
@@ -12,8 +13,64 @@ export default function FavoritesSidebar({
   selectedContract,
   onContractSelect,
   isOpen,
-  onToggle
+  onToggle,
+  derivativesData = null
 }) {
+  const { isDarkMode } = useTheme();
+
+  const sidebarBase = isDarkMode
+    ? 'bg-slate-900 border-slate-700 text-slate-200'
+    : 'bg-white border-gray-200 text-gray-900';
+
+  const overlayColor = isDarkMode ? 'bg-black/40' : 'bg-black/20';
+  const collapseButton = isDarkMode
+    ? 'border-slate-600 text-slate-200 hover:bg-slate-700'
+    : 'border-gray-200 text-gray-600 hover:bg-gray-100';
+
+  const collapsedLabel = isDarkMode ? 'text-slate-300' : 'text-gray-500';
+
+  const favoriteCardClasses = (isSelected) => {
+    if (isSelected) {
+      return isDarkMode
+        ? 'border-blue-400 shadow-lg bg-slate-800 text-blue-200'
+        : 'border-blue-500 shadow-lg bg-white text-gray-900';
+    }
+    return isDarkMode
+      ? 'border-slate-700 hover:border-slate-500 hover:shadow-md bg-slate-900 text-slate-200'
+      : 'border-gray-200 hover:border-gray-300 hover:shadow-md bg-white text-gray-900';
+  };
+
+  // Determine if API is live based on dataSource
+  const isApiLive = derivativesData?.dataSource === 'ZERODHA_KITE';
+  const apiStatus = isApiLive ? 'Active' : 'Inactive';
+
+  const statusDot = (fav, selected, isLive) => {
+    if (!isLive) {
+      // Inactive - orange dot
+      return isDarkMode ? 'bg-orange-400' : 'bg-orange-500';
+    }
+    // Active - blue dot (when selected) or blue/green when not selected
+    if (selected === fav.symbol) {
+      return isDarkMode ? 'bg-blue-400' : 'bg-blue-500';
+    }
+    return isDarkMode ? 'bg-blue-400' : 'bg-blue-500';
+  };
+
+  const statusText = (fav, selected, isLive) => {
+    if (!isLive) {
+      // Inactive - orange text
+      return isDarkMode ? 'text-orange-400' : 'text-orange-600';
+    }
+    // Active - blue text
+    return isDarkMode
+      ? selected === fav.symbol
+        ? 'text-blue-200'
+        : 'text-blue-300'
+      : selected === fav.symbol
+      ? 'text-blue-500'
+      : 'text-blue-600';
+  };
+
   const renderFavoritesContent = (closeButton = null) => (
     <div className="flex flex-col gap-6 h-full overflow-y-auto pr-1">
       {closeButton}
@@ -22,37 +79,21 @@ export default function FavoritesSidebar({
           <div
             key={fav.symbol}
             onClick={() => onSelect(fav.symbol)}
-            className={`cursor-pointer rounded-xl p-4 border transition-all duration-200 ${
-              selected === fav.symbol
-                ? 'border-blue-500 shadow-lg bg-white'
-                : 'border-gray-200 hover:border-gray-300 hover:shadow-md bg-white'
-            }`}
+            className={`cursor-pointer rounded-xl p-4 border transition-all duration-200 ${favoriteCardClasses(selected === fav.symbol)}`}
           >
             <div className="flex items-center justify-between">
               <div>
-                <h3
-                  className={`text-lg font-bold ${
-                    selected === fav.symbol ? 'text-blue-600' : 'text-gray-900'
-                  }`}
-                >
+                <h3 className="text-lg font-bold">
                   {fav.symbol}
                 </h3>
                 <p
-                  className={`text-sm ${
-                    selected === fav.symbol ? 'text-blue-500' : 'text-gray-600'
-                  }`}
+                  className={`text-sm ${statusText(fav, selected, isApiLive)}`}
                 >
-                  {fav.status}
+                  {apiStatus}
                 </p>
               </div>
               <div
-                className={`w-3 h-3 rounded-full ${
-                  fav.status === 'Active'
-                    ? selected === fav.symbol
-                      ? 'bg-blue-500'
-                      : 'bg-green-500'
-                    : 'bg-gray-400'
-                }`}
+                className={`w-3 h-3 rounded-full ${statusDot(fav, selected, isApiLive)}`}
               ></div>
             </div>
           </div>
@@ -73,20 +114,24 @@ export default function FavoritesSidebar({
     <>
       {/* Mobile / Tablet overlay */}
       <aside
-        className={`fixed inset-y-0 left-0 z-40 w-72 transform bg-white dark:bg-slate-900 border-r border-gray-200 dark:border-slate-700 shadow-xl transition-transform duration-300 lg:hidden ${
+        className={`fixed inset-y-0 left-0 z-40 w-72 transform ${sidebarBase} shadow-xl transition-transform duration-300 lg:hidden ${
           isOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
         aria-hidden={!isOpen}
       >
         {renderFavoritesContent(
           <div className="flex items-center justify-between pt-4 pr-4 pl-4">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+            <h2 className={`text-lg font-semibold ${isDarkMode ? 'text-slate-100' : 'text-gray-900'}`}>
               Instruments
             </h2>
             <button
               type="button"
               onClick={onToggle}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 dark:border-slate-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors"
+              className={`inline-flex h-9 w-9 items-center justify-center rounded-full border transition-colors ${
+                isDarkMode
+                  ? 'border-slate-600 text-slate-200 hover:bg-slate-700'
+                  : 'border-gray-200 text-gray-700 hover:bg-gray-100'
+              }`}
               aria-label="Close instruments panel"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -98,7 +143,7 @@ export default function FavoritesSidebar({
       </aside>
       {isOpen && (
         <div
-          className="fixed inset-0 z-30 bg-black/20 backdrop-blur-sm lg:hidden"
+          className={`fixed inset-0 z-30 ${overlayColor} backdrop-blur-sm lg:hidden`}
           onClick={onToggle}
           aria-hidden="true"
         />
@@ -106,14 +151,14 @@ export default function FavoritesSidebar({
 
       {/* Desktop sidebar */}
       <aside
-        className={`hidden lg:flex flex-col h-full bg-white dark:bg-slate-900 border-r border-gray-200 dark:border-slate-700 transition-all duration-300 overflow-hidden shadow-sm ${
+        className={`hidden lg:flex flex-col h-full transition-all duration-300 overflow-hidden shadow-sm ${sidebarBase} ${
           isOpen ? 'w-64 p-4' : 'w-14 p-3'
         }`}
       >
         <button
           type="button"
           onClick={onToggle}
-          className="self-end inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 dark:border-slate-600 text-gray-600 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors"
+          className={`self-end inline-flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${collapseButton}`}
           aria-label={isOpen ? 'Collapse instruments panel' : 'Expand instruments panel'}
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -128,10 +173,7 @@ export default function FavoritesSidebar({
         {isOpen ? (
           <div className="mt-4 flex-1">{renderFavoritesContent()}</div>
         ) : (
-          <div className="flex-1 flex items-center justify-center">
-            <span className="text-[10px] tracking-[0.3em] text-gray-500 dark:text-gray-400 rotate-90 uppercase">
-              Instruments
-            </span>
+          <div className="flex-1 flex items-center justify-center relative">
           </div>
         )}
       </aside>

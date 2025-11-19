@@ -2,9 +2,12 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import './index.css'
 import Root from './Root'
-import { configureLogger } from './utils/logger'
+// Logger initializes automatically on module load
+import './utils/logger'
+import { setRealViewportHeight } from './utils/viewport'
 
-configureLogger()
+// Set real viewport height on app initialization
+setRealViewportHeight()
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
