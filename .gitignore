@@ -45,6 +45,19 @@ hboardbackenddashboard
 # Cloudflare binaries
 cloudflared.exe
 
+# Installer build artifacts and large binaries
+installer/bin/*.exe
+installer/bin/*.msi
+installer/bin/*.dll
+installer/dist/*.exe
+installer/electron-launcher/node_modules/
+installer/electron-launcher/dist/
+installer/launch4j/jre/
+installer/api/node_modules/
+installer/api/uploads/
+installer/api/.env
+installer/api/ADMIN_KEY_GENERATED.txt
+
 # Frontend build artifacts
 frontend/dashboard-ui/node_modules/
 frontend/dashboard-ui/dist/
