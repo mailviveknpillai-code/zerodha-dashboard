@@ -1,5 +1,6 @@
 import React from 'react';
 import DataCell from './common/DataCell';
+import LTPCell from './common/LTPCell';
 import { useTheme } from '../contexts/ThemeContext';
 import { useContractColoringContext } from '../contexts/ContractColorContext';
 
@@ -235,12 +236,21 @@ export default function OptionsTable({
                     <td className={segmentCellClass}>
                       {renderSegmentContent()}
                     </td>
-                    <DataCell
-                      value={isStaticRow ? null : row.ltpRaw}
-                      className={`${numericCellBase} ${isStaticRow ? '' : 'font-semibold'}`}
-                      displayValue={row.ltp}
-                      coloringMeta={makeColorMeta('ltp')}
-                    />
+                    {isStaticRow ? (
+                      <DataCell
+                        value={null}
+                        className={`${numericCellBase}`}
+                        displayValue={row.ltp}
+                        coloringMeta={null}
+                      />
+                    ) : (
+                      <LTPCell
+                        value={row.ltpRaw}
+                        className={`${numericCellBase} ${isStaticRow ? '' : 'font-semibold'}`}
+                        displayValue={row.ltp}
+                        coloringMeta={makeColorMeta('ltp')}
+                      />
+                    )}
                     <DataCell
                       value={isStaticRow ? null : row.oiRaw}
                       className={`${numericCellBase} ${isStaticRow ? '' : 'font-semibold'}`}

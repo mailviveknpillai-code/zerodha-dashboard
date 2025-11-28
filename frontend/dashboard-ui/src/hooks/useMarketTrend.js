@@ -1,9 +1,9 @@
 import { useRef, useCallback, useMemo, useEffect, useState } from 'react';
 import { useTrendAveraging } from '../contexts/TrendAveragingContext';
+import { useTrendThreshold } from '../contexts/TrendThresholdContext';
 
-const SMOOTHING_CYCLES = 3; // Require 3 consecutive same classifications
-const BULLISH_THRESHOLD = 3;
-const BEARISH_THRESHOLD = -3;
+const SMOOTHING_CYCLES = 3; // Track last 3 classifications for smoothing
+const SMOOTHING_MAJORITY = 2; // Require at least 2 out of 3 to be the same (more responsive)
 
 // Weights for different metrics
 const WEIGHTS = {
@@ -223,6 +223,7 @@ function extractMetrics(contracts) {
  */
 export default function useMarketTrend(derivativesData) {
   const { averagingWindowSeconds } = useTrendAveraging();
+  const { bullishThreshold, bearishThreshold } = useTrendThreshold();
   const CACHE_SIZE = averagingWindowSeconds; // Use configurable window size
   const lastWindowSizeRef = useRef(averagingWindowSeconds);
   
@@ -415,8 +416,8 @@ export default function useMarketTrend(derivativesData) {
     // Determine classification using dual scoring logic
     let classification;
     let finalScore;
-    const bullishCrossed = normalizedBullishScore >= BULLISH_THRESHOLD;
-    const bearishCrossed = normalizedBearishScore <= BEARISH_THRESHOLD;
+    const bullishCrossed = normalizedBullishScore >= bullishThreshold;
+    const bearishCrossed = normalizedBearishScore <= bearishThreshold;
     
     if (bullishCrossed && bearishCrossed) {
       // Both crossed - use the one with higher absolute value
@@ -450,27 +451,62 @@ export default function useMarketTrend(derivativesData) {
       }
     }
     
-    // Smoothing: require 3 consecutive same classifications
+    // Smoothing: use majority rule (2 out of 3) for more responsive updates
     classificationHistoryRef.current.push(classification);
     if (classificationHistoryRef.current.length > SMOOTHING_CYCLES) {
       classificationHistoryRef.current.shift();
     }
     
-    // Check if last 3 are the same
-    if (classificationHistoryRef.current.length === SMOOTHING_CYCLES) {
-      const allSame = classificationHistoryRef.current.every(c => c === classification);
-      if (allSame) {
-        const newTrend = { classification, score: finalScore };
-        currentTrendRef.current = newTrend;
-        setTrend(newTrend);
+    // Determine final classification using majority rule
+    let finalClassification = classification;
+    
+    if (classificationHistoryRef.current.length >= SMOOTHING_CYCLES) {
+      // Count occurrences of each classification in the last 3
+      const counts = classificationHistoryRef.current.reduce((acc, c) => {
+        acc[c] = (acc[c] || 0) + 1;
+        return acc;
+      }, {});
+      
+      // Find the classification with the most occurrences
+      const mostCommon = Object.keys(counts).reduce((a, b) => 
+        counts[a] > counts[b] ? a : b
+      );
+      
+      // Use majority classification if it appears at least SMOOTHING_MAJORITY times
+      if (counts[mostCommon] >= SMOOTHING_MAJORITY) {
+        finalClassification = mostCommon;
+        
+        // If the majority classification is different from current, use its score
+        // Otherwise use the current calculated score
+        if (mostCommon !== classification) {
+          // Recalculate score for the majority classification
+          if (mostCommon === 'Bullish') {
+            finalScore = normalizedBullishScore;
+          } else if (mostCommon === 'Bearish') {
+            finalScore = normalizedBearishScore;
+          } else {
+            finalScore = Math.abs(normalizedBullishScore) > Math.abs(normalizedBearishScore) 
+              ? normalizedBullishScore 
+              : normalizedBearishScore;
+          }
+        }
       }
-    } else {
-      // Not enough history yet, use current
-      const newTrend = { classification, score: finalScore };
+      // If no majority (all different), use current classification
+    }
+    
+    // Always update if threshold is crossed, even if smoothing hasn't confirmed
+    // This ensures immediate response when thresholds are crossed
+    const shouldUpdate = 
+      bullishCrossed || bearishCrossed || // Threshold crossed - update immediately
+      classificationHistoryRef.current.length < SMOOTHING_CYCLES || // Not enough history yet
+      finalClassification === classification; // Current matches majority
+    
+    if (shouldUpdate) {
+      const newTrend = { classification: finalClassification, score: finalScore };
       currentTrendRef.current = newTrend;
       setTrend(newTrend);
     }
-  }, [cacheVersion, derivativesData, averagingWindowSeconds]); // Recalculate when window changes
+  }, [cacheVersion, derivativesData, averagingWindowSeconds, bullishThreshold, bearishThreshold]); // Recalculate when window or thresholds change
   
   return trend;
 }

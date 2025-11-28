@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import DataCell from './common/DataCell';
+import LTPCell from './common/LTPCell';
 import { TrendIcon } from './MarketSummary';
 import { useTheme } from '../contexts/ThemeContext';
 import useMarketTrend from '../hooks/useMarketTrend';
@@ -254,12 +255,21 @@ export default function FuturesTable({
             <span className="truncate block max-w-[200px]">{row.segment}</span>
           )}
         </td>
-        <DataCell
-          value={isStaticRow ? null : (row.ltpRaw ?? null)}
-          className={`${mainTableNumericPadding} px-2 sm:px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis ${isStaticRow ? '' : 'font-semibold'}`}
-          displayValue={row.ltp}
-          coloringMeta={makeColorMeta('ltp')}
-        />
+        {isStaticRow ? (
+          <DataCell
+            value={null}
+            className={`${mainTableNumericPadding} px-2 sm:px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis`}
+            displayValue={row.ltp}
+            coloringMeta={null}
+          />
+        ) : (
+          <LTPCell
+            value={row.ltpRaw ?? null}
+            className={`${mainTableNumericPadding} px-2 sm:px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell text-xs sm:text-sm ${isStaticRow ? '' : 'font-semibold'}`}
+            displayValue={row.ltp}
+            coloringMeta={makeColorMeta('ltp')}
+          />
+        )}
         <DataCell
           value={isStaticRow ? null : (row.oiRaw ?? null)}
           className={`${mainTableNumericPadding} px-2 sm:px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis ${isStaticRow ? '' : 'font-semibold'}`}

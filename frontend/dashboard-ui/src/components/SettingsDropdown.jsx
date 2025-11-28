@@ -4,6 +4,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useRefreshInterval } from '../contexts/RefreshIntervalContext';
 import { useVolumeWindow } from '../contexts/VolumeWindowContext';
 import { useTrendAveraging } from '../contexts/TrendAveragingContext';
+import { useTrendThreshold } from '../contexts/TrendThresholdContext';
 import { logoutZerodhaSession } from '../api/client';
 import { useNavigate } from 'react-router-dom';
 import logger from '../utils/logger';
@@ -18,6 +19,7 @@ export default function SettingsDropdown() {
   const { intervalMs, setIntervalMs, options } = useRefreshInterval();
   const { volumeWindowMinutes, setVolumeWindow } = useVolumeWindow();
   const { averagingWindowSeconds, setAveragingWindow } = useTrendAveraging();
+  const { bullishThreshold, bearishThreshold, setBullishThreshold, setBearishThreshold } = useTrendThreshold();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -264,6 +266,82 @@ export default function SettingsDropdown() {
                         `}
                       >
                         {seconds} second{seconds !== 1 ? 's' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className={`py-4 border-b ${sectionDivider}`}>
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <p className="text-sm font-medium">Bullish Threshold</p>
+                    <p className={`text-xs ${sliderHelper}`}>Minimum score for Bullish classification (1-10)</p>
+                  </div>
+                </div>
+                <div className="relative">
+                  <select
+                    value={bullishThreshold}
+                    onChange={(e) => setBullishThreshold(Number(e.target.value))}
+                    className={`refresh-rate-selector w-full px-4 py-2.5 rounded-lg border text-sm font-medium cursor-pointer transition-all duration-200 ${
+                      isDarkMode
+                        ? 'bg-slate-700/80 border-slate-600 text-slate-200 hover:bg-slate-700 hover:border-slate-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/50 focus:bg-slate-700'
+                        : 'bg-white border-gray-300 text-gray-900 hover:bg-gray-50 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 focus:bg-white'
+                    }`}
+                  >
+                    {Array.from({ length: 10 }, (_, i) => i + 1).map((value) => (
+                      <option 
+                        key={value} 
+                        value={value}
+                        className={`
+                          ${value === bullishThreshold 
+                            ? isDarkMode 
+                              ? 'bg-blue-600 text-white' 
+                              : 'bg-blue-500 text-white'
+                            : ''
+                          }
+                          ${isDarkMode ? 'bg-slate-700 text-slate-200' : 'bg-white text-gray-900'}
+                        `}
+                      >
+                        {value}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className={`py-4 border-b ${sectionDivider}`}>
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <p className="text-sm font-medium">Bearish Threshold</p>
+                    <p className={`text-xs ${sliderHelper}`}>Maximum score for Bearish classification (-1 to -10)</p>
+                  </div>
+                </div>
+                <div className="relative">
+                  <select
+                    value={bearishThreshold}
+                    onChange={(e) => setBearishThreshold(Number(e.target.value))}
+                    className={`refresh-rate-selector w-full px-4 py-2.5 rounded-lg border text-sm font-medium cursor-pointer transition-all duration-200 ${
+                      isDarkMode
+                        ? 'bg-slate-700/80 border-slate-600 text-slate-200 hover:bg-slate-700 hover:border-slate-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/50 focus:bg-slate-700'
+                        : 'bg-white border-gray-300 text-gray-900 hover:bg-gray-50 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 focus:bg-white'
+                    }`}
+                  >
+                    {Array.from({ length: 10 }, (_, i) => -(i + 1)).map((value) => (
+                      <option 
+                        key={value} 
+                        value={value}
+                        className={`
+                          ${value === bearishThreshold 
+                            ? isDarkMode 
+                              ? 'bg-blue-600 text-white' 
+                              : 'bg-blue-500 text-white'
+                            : ''
+                          }
+                          ${isDarkMode ? 'bg-slate-700 text-slate-200' : 'bg-white text-gray-900'}
+                        `}
+                      >
+                        {value}
                       </option>
                     ))}
                   </select>

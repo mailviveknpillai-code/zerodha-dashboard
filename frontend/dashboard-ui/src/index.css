@@ -606,6 +606,99 @@ th, td {
   vertical-align: middle;
 }
 
+/* LTP cells in fullscreen - center content and ensure indicator is visible */
+/* Override overflow hidden for LTP cells to ensure indicator is visible */
+.fullscreen-table td:has(.ltp-cell-container) {
+  overflow: visible !important; /* Allow indicator to be visible */
+}
+
+.fullscreen-table td .ltp-cell-container {
+  align-items: center !important; /* Center horizontally */
+  justify-content: center !important; /* Center vertically */
+  min-height: auto !important; /* Remove min-height constraint */
+  padding: 0.25rem 0 !important; /* Reduce padding for fullscreen */
+  overflow: visible !important; /* Ensure content is not clipped */
+}
+
+/* Override items-end and justify-end classes in fullscreen */
+.fullscreen-table td .ltp-cell-container[class*="items-end"],
+.fullscreen-table td .ltp-cell-container.items-end {
+  align-items: center !important;
+}
+
+.fullscreen-table td .ltp-cell-container[class*="justify-start"],
+.fullscreen-table td .ltp-cell-container.justify-start {
+  justify-content: center !important;
+}
+
+/* LTP indicator in fullscreen - ensure it's visible and centered */
+.fullscreen-table td .ltp-indicator {
+  display: flex !important; /* Ensure it's displayed */
+  justify-content: center !important; /* Center the indicator */
+  align-items: center !important;
+  font-size: 0.65rem !important; /* Slightly larger for visibility */
+  margin-bottom: 0.25rem !important;
+  height: auto !important; /* Allow height to adjust */
+  min-height: 0.875rem !important; /* Minimum height for visibility */
+  opacity: 1 !important; /* Ensure it's not transparent */
+  visibility: visible !important; /* Ensure it's visible */
+}
+
+/* Override justify-end on indicator in fullscreen */
+.fullscreen-table td .ltp-indicator[class*="justify-end"],
+.fullscreen-table td .ltp-indicator.justify-end {
+  justify-content: center !important;
+}
+
+.fullscreen-table td .ltp-indicator > span:first-child {
+  font-size: 0.75rem !important; /* Arrow size */
+  display: inline-block !important;
+}
+
+.fullscreen-table td .ltp-indicator > span:last-child {
+  font-size: 0.6rem !important; /* Percentage size */
+  display: inline-block !important;
+}
+
+/* LTP value text in fullscreen - ensure it matches other cells and is centered */
+.fullscreen-table td .ltp-value {
+  justify-content: center !important; /* Center the value */
+  align-items: center !important;
+  text-align: center !important;
+  display: flex !important;
+}
+
+/* Override text-right classes in fullscreen */
+.fullscreen-table td .ltp-value.text-right,
+.fullscreen-table td .ltp-value[class*="text-right"] {
+  text-align: center !important;
+}
+
+/* Override items-end and justify-end on value div */
+.fullscreen-table td .ltp-value[class*="items-end"],
+.fullscreen-table td .ltp-value.items-end {
+  align-items: center !important;
+}
+
+.fullscreen-table td .ltp-value[class*="justify-end"],
+.fullscreen-table td .ltp-value.justify-end {
+  justify-content: center !important;
+}
+
+.fullscreen-table td .ltp-value > span {
+  text-align: center !important;
+  font-size: 0.9rem !important; /* Match the cell font size */
+  font-weight: 700 !important;
+  line-height: 1.05 !important;
+  width: 100% !important;
+}
+
+/* Override text-right on the span as well */
+.fullscreen-table td .ltp-value > span.text-right,
+.fullscreen-table td .ltp-value > span[class*="text-right"] {
+  text-align: center !important;
+}
+
 /* Segment column - smaller font size to save space */
 .fullscreen-table td:first-child,
 .fullscreen-table th:first-child {
