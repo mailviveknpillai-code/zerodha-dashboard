@@ -1,9 +1,12 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import DataCell from './common/DataCell';
 import LTPCell from './common/LTPCell';
+import DeltaBACell from './common/DeltaBACell';
+import BidQtyCell from './common/BidQtyCell';
+import AskQtyCell from './common/AskQtyCell';
 import { TrendIcon } from './MarketSummary';
 import { useTheme } from '../contexts/ThemeContext';
-import useMarketTrend from '../hooks/useMarketTrend';
+// Trend is now calculated in backend - removed useMarketTrend import
 import { useContractColoringContext } from '../contexts/ContractColorContext';
 
 export default function FuturesTable({
@@ -22,7 +25,22 @@ export default function FuturesTable({
   const previousSpotRef = React.useRef(null);
   const previousVolumeRef = React.useRef(null);
   const { isDarkMode } = useTheme();
-  const marketTrend = useMarketTrend(derivativesData);
+  
+  // Read trend from backend (calculated from API polled values with FIFO window)
+  // Trend is updated in UI at frontend refresh rate, but calculation is based on API polling
+  const marketTrend = derivativesData?.trendClassification && derivativesData?.trendScore != null
+    ? {
+        classification: derivativesData.trendClassification,
+        score: Number(derivativesData.trendScore)
+      }
+    : { classification: 'Neutral', score: 0 };
+  
+  // Read spot LTP trend from backend (average movement over configured window)
+  const spotLtpTrend = {
+    direction: derivativesData?.spotLtpTrendDirection || 'FLAT',
+    percent: derivativesData?.spotLtpTrendPercent ?? 0
+  };
+  
   const colorContext = useContractColoringContext();
   
   // Helper to get delta OI using separate OI cache
@@ -268,6 +286,9 @@ export default function FuturesTable({
             className={`${mainTableNumericPadding} px-2 sm:px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell text-xs sm:text-sm ${isStaticRow ? '' : 'font-semibold'}`}
             displayValue={row.ltp}
             coloringMeta={makeColorMeta('ltp')}
+            ltpMovementDirection={row.ltpMovementDirection}
+            ltpMovementConfidence={row.ltpMovementConfidence}
+            ltpMovementIntensity={row.ltpMovementIntensity}
           />
         )}
         <DataCell
@@ -319,14 +340,19 @@ export default function FuturesTable({
           displayValue={row.ask}
           coloringMeta={makeColorMeta('ask')}
         />
-        <DataCell
-          value={isStaticRow ? null : (row.bidQtyRaw ?? null)}
+        <BidQtyCell
+          bidQtyValue={isStaticRow ? null : (row.bidQtyRaw ?? null)}
+          bidQtyDisplay={row.bidQty}
+          bidEatenValue={isStaticRow ? null : (row.bidEatenRaw ?? null)}
           className={`${mainTableNumericPadding} px-2 sm:px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis ${isStaticRow ? '' : 'font-semibold'}`}
-          displayValue={row.bidQty}
           coloringMeta={makeColorMeta('bidQty')}
+          title="Bid Quantity (updates at UI refresh rate). Bubble shows Bid Eaten (uses eaten delta window interval)"
         />
         {(() => {
           // Calculate ΔB/A QTY = bidQty - askQty
+          // NOTE: This value updates at the UI refresh rate (frontend polls /latest endpoint)
+          // The eaten delta window interval ONLY affects the bubble (eatenDeltaRaw)
+          // API polling interval controls when backend fetches from Zerodha API
           const bidQty = isStaticRow ? null : (row.bidQtyRaw ?? null);
           const askQty = isStaticRow ? null : (row.askQtyRaw ?? null);
           const deltaBA = bidQty !== null && askQty !== null && Number.isFinite(bidQty) && Number.isFinite(askQty)
@@ -338,19 +364,23 @@ export default function FuturesTable({
             : '';
           
           return (
-            <DataCell
-              value={isStaticRow ? null : deltaBA}
-              className={`${mainTableNumericPadding} px-2 sm:px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis ${isStaticRow ? '' : 'font-semibold'}`}
-              displayValue={deltaBADisplay}
+            <DeltaBACell
+              deltaBAValue={isStaticRow ? null : deltaBA}
+              deltaBADisplay={deltaBADisplay}
+              eatenDeltaValue={isStaticRow ? null : (row.eatenDeltaRaw ?? null)}
+              className={`${mainTableNumericPadding} px-2 sm:px-4 whitespace-nowrap tabular-nums font-mono data-cell text-xs sm:text-sm ${isStaticRow ? '' : 'font-semibold'}`}
               coloringMeta={makeColorMeta('deltaBA')}
+              title="ΔB/A QTY = Bid Qty - Ask Qty (updates at UI refresh rate). Bubble shows Eaten Δ (uses eaten delta window interval)"
             />
           );
         })()}
-        <DataCell
-          value={isStaticRow ? null : (row.askQtyRaw ?? null)}
+        <AskQtyCell
+          askQtyValue={isStaticRow ? null : (row.askQtyRaw ?? null)}
+          askQtyDisplay={row.askQty}
+          askEatenValue={isStaticRow ? null : (row.askEatenRaw ?? null)}
           className={`${mainTableNumericPadding} px-2 sm:px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis ${isStaticRow ? '' : 'font-semibold'}`}
-          displayValue={row.askQty}
           coloringMeta={makeColorMeta('askQty')}
+          title="Ask Quantity (updates at UI refresh rate). Bubble shows Ask Eaten (uses eaten delta window interval)"
         />
         <DataCell
           value={isStaticRow ? null : (row.changeRaw ?? null)}
@@ -510,6 +540,19 @@ export default function FuturesTable({
                   {marketTrend.classification} {marketTrend.score != null ? `(${marketTrend.score > 0 ? '+' : ''}${marketTrend.score.toFixed(1)})` : ''}
                 </span>
               )}
+              {/* Spot LTP Trend Pill */}
+              <span className={`text-xs font-medium px-2.5 py-1 rounded-full transition-all duration-300 ${
+                spotLtpTrend.direction === 'UP'
+                  ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
+                  : spotLtpTrend.direction === 'DOWN'
+                  ? 'bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30'
+                  : 'bg-slate-500/20 text-slate-600 dark:text-slate-400 border border-slate-500/30'
+              }`}>
+                <span className="mr-1">
+                  {spotLtpTrend.direction === 'UP' ? '↑' : spotLtpTrend.direction === 'DOWN' ? '↓' : '→'}
+                </span>
+                LTP {spotLtpTrend.percent > 0 ? '+' : ''}{spotLtpTrend.percent.toFixed(2)}%
+              </span>
             </h3>
           </div>
           <div className="flex items-center gap-4">
@@ -558,9 +601,9 @@ export default function FuturesTable({
           <col style={{ width: '8%' }} />
           <col style={{ width: '8%' }} />
           <col style={{ width: '8%' }} />
+          <col style={{ width: '8%' }} />
+          <col style={{ width: '8%' }} />
           <col style={{ width: '7%' }} />
-          <col style={{ width: '8%' }} />
-          <col style={{ width: '8%' }} />
         </colgroup>
         <thead
           className={`text-xs font-semibold uppercase tracking-wide ${
@@ -576,7 +619,12 @@ export default function FuturesTable({
             <th className="px-3 sm:px-4 py-3 text-right">Bid</th>
             <th className="px-3 sm:px-4 py-3 text-right">Ask</th>
             <th className="px-3 sm:px-4 py-3 text-right">Bid Qty</th>
-            <th className="px-3 sm:px-4 py-3 text-right">ΔB/A QTY</th>
+            <th 
+              className="px-3 sm:px-4 py-3 text-right" 
+              title="Bid Qty - Ask Qty. Bubble shows Eaten Δ (Ask Eaten - Bid Eaten over rolling window)"
+            >
+              ΔB/A QTY
+            </th>
             <th className="px-3 sm:px-4 py-3 text-right">Ask Qty</th>
             <th className="px-3 sm:px-4 py-3 text-right">Δ Price</th>
           </tr>
@@ -684,6 +732,25 @@ export default function FuturesTable({
                     {marketTrend.classification} {marketTrend.score != null ? `(${marketTrend.score > 0 ? '+' : ''}${marketTrend.score.toFixed(1)})` : ''}
                   </span>
                 )}
+                {/* Spot LTP Trend Pill - Fullscreen */}
+                <span className={`text-sm font-medium px-3 py-1.5 rounded-full transition-all duration-300 ${
+                  spotLtpTrend.direction === 'UP'
+                    ? isDarkMode
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                      : 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/30'
+                    : spotLtpTrend.direction === 'DOWN'
+                    ? isDarkMode
+                      ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                      : 'bg-rose-500/10 text-rose-600 border border-rose-500/30'
+                    : isDarkMode
+                    ? 'bg-slate-500/20 text-slate-300 border border-slate-500/40'
+                    : 'bg-slate-500/10 text-slate-600 border border-slate-500/30'
+                }`}>
+                  <span className="mr-1.5">
+                    {spotLtpTrend.direction === 'UP' ? '↑' : spotLtpTrend.direction === 'DOWN' ? '↓' : '→'}
+                  </span>
+                  LTP {spotLtpTrend.percent > 0 ? '+' : ''}{spotLtpTrend.percent.toFixed(2)}%
+                </span>
               </div>
               <div className="flex items-center gap-3">
                 {spot && (
@@ -743,7 +810,7 @@ export default function FuturesTable({
                 <col style={{ width: '9.25%' }} />
                 <col style={{ width: '9.25%' }} />
                 <col style={{ width: '9.25%' }} />
-                <col style={{ width: '7%' }} />
+                <col style={{ width: '9.25%' }} />
                 <col style={{ width: '9.25%' }} />
                 <col style={{ width: '9.25%' }} />
               </colgroup>
@@ -761,7 +828,12 @@ export default function FuturesTable({
                   <th className={`text-right border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}>Bid</th>
                   <th className={`text-right border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}>Ask</th>
                   <th className={`text-right border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}>Bid Qty</th>
-                  <th className={`text-right border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}>ΔB/A QTY</th>
+                  <th 
+                    className={`text-right border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}
+                    title="Bid Qty - Ask Qty. Bubble shows Eaten Δ (Ask Eaten - Bid Eaten over rolling window)"
+                  >
+                    ΔB/A QTY
+                  </th>
                   <th className={`text-right border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}>Ask Qty</th>
                   <th className="text-right">Δ Price</th>
                 </tr>
@@ -776,7 +848,7 @@ export default function FuturesTable({
                       }`}
                     >
                       <td
-                        colSpan={10}
+                        colSpan={11}
                         className={`font-semibold uppercase tracking-wide ${
                           isDarkMode ? 'text-slate-300' : 'text-slate-600'
                         }`}

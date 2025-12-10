@@ -2,9 +2,14 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import ToggleSwitch from './ToggleSwitch';
 import { useTheme } from '../contexts/ThemeContext';
 import { useRefreshInterval } from '../contexts/RefreshIntervalContext';
+import { useApiPollingInterval } from '../contexts/ApiPollingIntervalContext';
 import { useVolumeWindow } from '../contexts/VolumeWindowContext';
 import { useTrendAveraging } from '../contexts/TrendAveragingContext';
 import { useTrendThreshold } from '../contexts/TrendThresholdContext';
+import { useEatenDeltaWindow } from '../contexts/EatenDeltaWindowContext';
+import { useLtpMovementCacheSize } from '../contexts/LtpMovementCacheSizeContext';
+import { useSpotLtpInterval } from '../contexts/SpotLtpIntervalContext';
+import { useDebugMode } from '../contexts/DebugModeContext';
 import { logoutZerodhaSession } from '../api/client';
 import { useNavigate } from 'react-router-dom';
 import logger from '../utils/logger';
@@ -14,12 +19,21 @@ export default function SettingsDropdown() {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [logoutLoading, setLogoutLoading] = useState(false);
   const [logoutError, setLogoutError] = useState(null);
+  const [showApiPollingConfirm, setShowApiPollingConfirm] = useState(false);
+  const [pendingApiPollingValue, setPendingApiPollingValue] = useState(null);
+  const [showUiRefreshConfirm, setShowUiRefreshConfirm] = useState(false);
+  const [pendingUiRefreshValue, setPendingUiRefreshValue] = useState(null);
   const dropdownRef = useRef(null);
   const { isDarkMode, toggleDarkMode } = useTheme();
   const { intervalMs, setIntervalMs, options } = useRefreshInterval();
+  const { intervalMs: apiPollingIntervalMs, setIntervalMs: setApiPollingIntervalMs, options: apiPollingOptions } = useApiPollingInterval();
   const { volumeWindowMinutes, setVolumeWindow } = useVolumeWindow();
   const { averagingWindowSeconds, setAveragingWindow } = useTrendAveraging();
   const { bullishThreshold, bearishThreshold, setBullishThreshold, setBearishThreshold } = useTrendThreshold();
+  const { windowSeconds, updateWindowSeconds } = useEatenDeltaWindow();
+  const { cacheSize: ltpMovementCacheSize, setCacheSize: setLtpMovementCacheSize } = useLtpMovementCacheSize();
+  const { intervalSeconds: spotLtpInterval, setIntervalSeconds: setSpotLtpInterval } = useSpotLtpInterval();
+  const { debugMode, setDebugMode } = useDebugMode();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -82,25 +96,79 @@ export default function SettingsDropdown() {
   const sliderLabels = isDarkMode ? 'text-slate-400' : 'text-gray-400';
   const sliderHelper = isDarkMode ? 'text-slate-300' : 'text-gray-600';
 
-  // Find current interval index
+  // Find current interval index for UI refresh rate
   const currentIntervalIndex = useMemo(() => {
     const index = options.findIndex(opt => opt.value === intervalMs);
     return index >= 0 ? index : Math.floor(options.length / 2);
   }, [intervalMs, options]);
 
-  const handleIntervalChange = async (event) => {
+  // Find current interval index for API polling interval
+  const currentApiPollingIndex = useMemo(() => {
+    const index = apiPollingOptions.findIndex(opt => opt.value === apiPollingIntervalMs);
+    return index >= 0 ? index : Math.floor(apiPollingOptions.length / 2);
+  }, [apiPollingIntervalMs, apiPollingOptions]);
+
+  const handleIntervalChange = (event) => {
     const selectedIndex = Number(event.target.value);
     const selectedOption = options[selectedIndex];
     if (selectedOption) {
-      logger.info('[SettingsDropdown] Refresh rate changed', { 
-        selectedIndex, 
-        newIntervalMs: selectedOption.value,
-        label: selectedOption.label 
-      });
-      await setIntervalMs(selectedOption.value);
+      // Show confirmation before changing UI refresh rate
+      setPendingUiRefreshValue(selectedOption.value);
+      setShowUiRefreshConfirm(true);
+      setIsOpen(false);
     } else {
       logger.error('[SettingsDropdown] No option found for index', { selectedIndex, totalOptions: options.length });
     }
+  };
+
+  const confirmUiRefreshChange = async () => {
+    if (pendingUiRefreshValue !== null) {
+      logger.info('[SettingsDropdown] UI Refresh rate changed', { 
+        newIntervalMs: pendingUiRefreshValue,
+        oldIntervalMs: intervalMs
+      });
+      await setIntervalMs(pendingUiRefreshValue);
+      setPendingUiRefreshValue(null);
+    }
+    setShowUiRefreshConfirm(false);
+  };
+
+  const cancelUiRefreshChange = () => {
+    setPendingUiRefreshValue(null);
+    setShowUiRefreshConfirm(false);
+  };
+
+  const handleApiPollingIntervalChange = (event) => {
+    const selectedIndex = Number(event.target.value);
+    const selectedOption = apiPollingOptions[selectedIndex];
+    if (selectedOption) {
+      // Show confirmation before changing API polling interval
+      setPendingApiPollingValue(selectedOption.value);
+      setShowApiPollingConfirm(true);
+      setIsOpen(false);
+    } else {
+      logger.error('[SettingsDropdown] No option found for API polling index', { selectedIndex, totalOptions: apiPollingOptions.length });
+    }
+  };
+
+  const confirmApiPollingChange = async () => {
+    if (pendingApiPollingValue !== null) {
+      const intervalSeconds = pendingApiPollingValue / 1000;
+      logger.info('[SettingsDropdown] API Polling interval changed', { 
+        newIntervalMs: pendingApiPollingValue,
+        newIntervalSeconds: intervalSeconds,
+        oldIntervalMs: apiPollingIntervalMs,
+        isLowValue: intervalSeconds < 1.5
+      });
+      await setApiPollingIntervalMs(pendingApiPollingValue);
+      setPendingApiPollingValue(null);
+    }
+    setShowApiPollingConfirm(false);
+  };
+
+  const cancelApiPollingChange = () => {
+    setPendingApiPollingValue(null);
+    setShowApiPollingConfirm(false);
   };
 
   const logoutButton = [
@@ -158,13 +226,61 @@ export default function SettingsDropdown() {
                 className={`border-b ${sectionDivider}`}
               />
 
-              <div className={`py-4 border-b ${sectionDivider}`}>
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <p className="text-sm font-medium">Refresh Rate</p>
-                    <p className={`text-xs ${sliderHelper}`}>Poll frequency for live data (0.75 - 7)</p>
-                  </div>
+              <ToggleSwitch
+                enabled={debugMode}
+                onChange={setDebugMode}
+                label="Debug Mode"
+                description="Enable detailed logging for troubleshooting"
+                className={`border-b ${sectionDivider}`}
+              />
+
+                     {/* API Polling Interval - Backend polls Zerodha API */}
+                     <div className={`py-4 border-b ${sectionDivider}`}>
+                       <div className="flex items-center justify-between mb-3">
+                         <div>
+                           <p className="text-sm font-medium">API Polling Interval</p>
+                           <p className={`text-xs ${sliderHelper}`}>How often backend polls Zerodha API to fetch new data (0.75 - 7s)</p>
+                         </div>
+                       </div>
+                <div className="relative">
+                  <select
+                    value={currentApiPollingIndex}
+                    onChange={handleApiPollingIntervalChange}
+                    className={`refresh-rate-selector w-full px-4 py-2.5 rounded-lg border text-sm font-medium cursor-pointer transition-all duration-200 ${
+                      isDarkMode
+                        ? 'bg-slate-700/80 border-slate-600 text-slate-200 hover:bg-slate-700 hover:border-slate-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/50 focus:bg-slate-700'
+                        : 'bg-white border-gray-300 text-gray-900 hover:bg-gray-50 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 focus:bg-white'
+                    }`}
+                  >
+                    {apiPollingOptions.map((option, index) => (
+                      <option 
+                        key={option.value} 
+                        value={index}
+                        className={`
+                          ${index === currentApiPollingIndex
+                            ? isDarkMode 
+                              ? 'bg-blue-600 text-white' 
+                              : 'bg-blue-500 text-white'
+                            : ''
+                          }
+                          ${isDarkMode ? 'bg-slate-700 text-slate-200' : 'bg-white text-gray-900'}
+                        `}
+                      >
+                        {option.label}s
+                      </option>
+                    ))}
+                  </select>
                 </div>
+              </div>
+
+                     {/* UI Refresh Rate - Frontend polls backend /latest endpoint */}
+                     <div className={`py-4 border-b ${sectionDivider}`}>
+                       <div className="flex items-center justify-between mb-3">
+                         <div>
+                           <p className="text-sm font-medium">UI Refresh Rate</p>
+                           <p className={`text-xs ${sliderHelper}`}>How often UI updates values from backend cache (0.75 - 7s)</p>
+                         </div>
+                       </div>
                 <div className="relative">
                   <select
                     value={currentIntervalIndex}
@@ -189,7 +305,7 @@ export default function SettingsDropdown() {
                           ${isDarkMode ? 'bg-slate-700 text-slate-200' : 'bg-white text-gray-900'}
                         `}
                       >
-                        {option.label}
+                        {option.label}s
                       </option>
                     ))}
                   </select>
@@ -237,8 +353,8 @@ export default function SettingsDropdown() {
               <div className={`py-4 border-b ${sectionDivider}`}>
                 <div className="flex items-center justify-between mb-3">
                   <div>
-                    <p className="text-sm font-medium">Trend Averaging Window</p>
-                    <p className={`text-xs ${sliderHelper}`}>Time window for trend calculation (3-15 seconds)</p>
+                    <p className="text-sm font-medium">Trend Calculation Window</p>
+                    <p className={`text-xs ${sliderHelper}`}>FIFO window size for trend calculation (uses API polled values, updated at UI refresh rate)</p>
                   </div>
                 </div>
                 <div className="relative">
@@ -348,6 +464,82 @@ export default function SettingsDropdown() {
                 </div>
               </div>
 
+              <div className={`py-4 border-b ${sectionDivider}`}>
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <p className="text-sm font-medium">Spot LTP Trend Window</p>
+                    <p className={`text-xs ${sliderHelper}`}>Time window for spot LTP average movement (5-60s)</p>
+                  </div>
+                </div>
+                <div className="relative">
+                  <select
+                    value={spotLtpInterval}
+                    onChange={(e) => setSpotLtpInterval(Number(e.target.value))}
+                    className={`refresh-rate-selector w-full px-4 py-2.5 rounded-lg border text-sm font-medium cursor-pointer transition-all duration-200 ${
+                      isDarkMode
+                        ? 'bg-slate-700/80 border-slate-600 text-slate-200 hover:bg-slate-700 hover:border-slate-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/50 focus:bg-slate-700'
+                        : 'bg-white border-gray-300 text-gray-900 hover:bg-gray-50 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 focus:bg-white'
+                    }`}
+                  >
+                    {[5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60].map((seconds) => (
+                      <option 
+                        key={seconds} 
+                        value={seconds}
+                        className={`
+                          ${seconds === spotLtpInterval 
+                            ? isDarkMode 
+                              ? 'bg-blue-600 text-white' 
+                              : 'bg-blue-500 text-white'
+                            : ''
+                          }
+                          ${isDarkMode ? 'bg-slate-700 text-slate-200' : 'bg-white text-gray-900'}
+                        `}
+                      >
+                        {seconds} second{seconds !== 1 ? 's' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className={`py-4 border-b ${sectionDivider}`}>
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <p className="text-sm font-medium">Eaten Δ Window</p>
+                    <p className={`text-xs ${sliderHelper}`}>Rolling window for Eaten Delta calculation (1s, 3s, 5s, 10s, 30s)</p>
+                  </div>
+                </div>
+                <div className="relative">
+                  <select
+                    value={windowSeconds}
+                    onChange={(e) => updateWindowSeconds(Number(e.target.value))}
+                    className={`refresh-rate-selector w-full px-4 py-2.5 rounded-lg border text-sm font-medium cursor-pointer transition-all duration-200 ${
+                      isDarkMode
+                        ? 'bg-slate-700/80 border-slate-600 text-slate-200 hover:bg-slate-700 hover:border-slate-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/50 focus:bg-slate-700'
+                        : 'bg-white border-gray-300 text-gray-900 hover:bg-gray-50 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 focus:bg-white'
+                    }`}
+                  >
+                    {[1, 3, 5, 10, 30].map((seconds) => (
+                      <option 
+                        key={seconds} 
+                        value={seconds}
+                        className={`
+                          ${seconds === windowSeconds 
+                            ? isDarkMode 
+                              ? 'bg-blue-600 text-white' 
+                              : 'bg-blue-500 text-white'
+                            : ''
+                          }
+                          ${isDarkMode ? 'bg-slate-700 text-slate-200' : 'bg-white text-gray-900'}
+                        `}
+                      >
+                        {seconds} second{seconds !== 1 ? 's' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
               <div className="pt-4">
                 <button type="button" onClick={handleLogoutClick} className={logoutButton}>
                   Logout Zerodha
@@ -357,6 +549,98 @@ export default function SettingsDropdown() {
           </div>
         )}
       </div>
+
+      {/* API Polling Interval Confirmation Modal */}
+      {showApiPollingConfirm && (
+        <div className={`fixed inset-0 z-50 flex items-center justify-center ${overlayClasses} backdrop-blur-sm px-4`}>
+          <div className={modalClasses}>
+            <h3 className="text-lg font-semibold mb-2">
+              {pendingApiPollingValue && (pendingApiPollingValue / 1000) < 1.5
+                ? '⚠️ Warning: Low Polling Interval'
+                : 'Confirm API Polling Interval Change'}
+            </h3>
+            {pendingApiPollingValue && (pendingApiPollingValue / 1000) < 1.5 ? (
+              <>
+                <p className={`text-sm mb-4 ${isDarkMode ? 'text-red-400' : 'text-red-600'}`}>
+                  <strong>Warning:</strong> Setting API polling interval below 1.5 seconds may cause application crashes or API rate limiting issues.
+                </p>
+                <p className="text-sm mb-4">
+                  Current: <strong>{apiPollingIntervalMs / 1000}s</strong> → New: <strong>{pendingApiPollingValue / 1000}s</strong>
+                </p>
+                <p className="text-sm mb-4">
+                  Are you sure you want to proceed?
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm mb-4">
+                  Change API polling interval from <strong>{apiPollingIntervalMs / 1000}s</strong> to <strong>{pendingApiPollingValue ? pendingApiPollingValue / 1000 : ''}s</strong>?
+                </p>
+                <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'} mb-4`}>
+                  This controls how often the backend polls the Zerodha API and updates the cache.
+                </p>
+              </>
+            )}
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={cancelApiPollingChange}
+                className={cancelButton}
+                disabled={false}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmApiPollingChange}
+                className={[
+                  'px-4 py-2 rounded-lg border transition-colors font-semibold',
+                  pendingApiPollingValue && (pendingApiPollingValue / 1000) < 1.5
+                    ? 'border-red-500 bg-red-500 text-white hover:bg-red-600'
+                    : isDarkMode
+                    ? 'border-blue-500 bg-blue-500 text-white hover:bg-blue-600'
+                    : 'border-blue-500 bg-blue-500 text-white hover:bg-blue-600',
+                ].join(' ')}
+              >
+                {pendingApiPollingValue && (pendingApiPollingValue / 1000) < 1.5 ? 'Proceed Anyway' : 'Confirm'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* UI Refresh Rate Confirmation Modal */}
+      {showUiRefreshConfirm && (
+        <div className={`fixed inset-0 z-50 flex items-center justify-center ${overlayClasses} backdrop-blur-sm px-4`}>
+          <div className={modalClasses}>
+            <h3 className="text-lg font-semibold mb-2">Confirm UI Refresh Rate Change</h3>
+            <p className="text-sm mb-4">
+              Change UI refresh rate from <strong>{intervalMs / 1000}s</strong> to <strong>{pendingUiRefreshValue ? pendingUiRefreshValue / 1000 : ''}s</strong>?
+            </p>
+            <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'} mb-4`}>
+              This controls how often the UI polls the backend /latest endpoint to update the display.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={cancelUiRefreshChange}
+                className={cancelButton}
+                disabled={false}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmUiRefreshChange}
+                className={[
+                  'px-4 py-2 rounded-lg border transition-colors font-semibold',
+                  isDarkMode
+                    ? 'border-blue-500 bg-blue-500 text-white hover:bg-blue-600'
+                    : 'border-blue-500 bg-blue-500 text-white hover:bg-blue-600',
+                ].join(' ')}
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showLogoutConfirm && (
         <div className={`fixed inset-0 z-50 flex items-center justify-center ${overlayClasses} backdrop-blur-sm px-4`}>

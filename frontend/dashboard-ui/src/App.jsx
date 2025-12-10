@@ -5,6 +5,11 @@ import { RefreshIntervalProvider } from './contexts/RefreshIntervalContext';
 import { VolumeWindowProvider } from './contexts/VolumeWindowContext';
 import { TrendAveragingProvider } from './contexts/TrendAveragingContext';
 import { TrendThresholdProvider } from './contexts/TrendThresholdContext';
+import { EatenDeltaWindowProvider } from './contexts/EatenDeltaWindowContext';
+import { ApiPollingIntervalProvider } from './contexts/ApiPollingIntervalContext';
+import { DebugModeProvider } from './contexts/DebugModeContext';
+import { LtpMovementCacheSizeProvider } from './contexts/LtpMovementCacheSizeContext';
+import { SpotLtpIntervalProvider } from './contexts/SpotLtpIntervalContext';
 import DashboardLayout from './components/DashboardLayout';
 import FnOChain from './components/FnOChain';
 import RequireZerodhaSession from './components/RequireZerodhaSession';
@@ -20,20 +25,30 @@ export default function App() {
 
   return (
     <ThemeProvider>
-      <RefreshIntervalProvider>
-        <VolumeWindowProvider>
-          <TrendAveragingProvider>
-            <TrendThresholdProvider>
-              <Routes>
-                <Route path="/zerodha-login" element={<ZerodhaLogin />} />
-                <Route path="/" element={wrapWithSession(<DashboardLayout />)} />
-                <Route path="/fno-chain" element={wrapWithSession(<FnOChain />)} />
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
-            </TrendThresholdProvider>
-          </TrendAveragingProvider>
-        </VolumeWindowProvider>
-      </RefreshIntervalProvider>
+      <DebugModeProvider>
+        <RefreshIntervalProvider>
+          <VolumeWindowProvider>
+            <TrendAveragingProvider>
+              <TrendThresholdProvider>
+                <EatenDeltaWindowProvider>
+                  <LtpMovementCacheSizeProvider>
+                    <SpotLtpIntervalProvider>
+                      <ApiPollingIntervalProvider>
+                        <Routes>
+                          <Route path="/zerodha-login" element={<ZerodhaLogin />} />
+                          <Route path="/" element={wrapWithSession(<DashboardLayout />)} />
+                          <Route path="/fno-chain" element={wrapWithSession(<FnOChain />)} />
+                          <Route path="*" element={<Navigate to="/" replace />} />
+                        </Routes>
+                      </ApiPollingIntervalProvider>
+                    </SpotLtpIntervalProvider>
+                  </LtpMovementCacheSizeProvider>
+                </EatenDeltaWindowProvider>
+              </TrendThresholdProvider>
+            </TrendAveragingProvider>
+          </VolumeWindowProvider>
+        </RefreshIntervalProvider>
+      </DebugModeProvider>
     </ThemeProvider>
   );
 }

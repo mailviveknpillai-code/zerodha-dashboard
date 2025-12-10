@@ -18,6 +18,10 @@ public class DerivativesChain {
     private List<DerivativeContract> putOptions;
     private Instant timestamp;
     private String dataSource; // BREEZE_API, ZERODHA_KITE, NO_DATA
+    private String trendClassification; // Bullish, Bearish, Neutral (calculated in backend from API polled values)
+    private Double trendScore; // Normalized score from -10 to +10
+    private Double spotLtpTrendPercent; // Percent change of spot LTP over configured window
+    private String spotLtpTrendDirection; // UP, DOWN, FLAT
 
     public DerivativesChain() {
         this.futures = new ArrayList<>();
@@ -56,6 +60,18 @@ public class DerivativesChain {
 
     public String getDataSource() { return dataSource; }
     public void setDataSource(String dataSource) { this.dataSource = dataSource; }
+
+    public String getTrendClassification() { return trendClassification; }
+    public void setTrendClassification(String trendClassification) { this.trendClassification = trendClassification; }
+
+    public Double getTrendScore() { return trendScore; }
+    public void setTrendScore(Double trendScore) { this.trendScore = trendScore; }
+
+    public Double getSpotLtpTrendPercent() { return spotLtpTrendPercent; }
+    public void setSpotLtpTrendPercent(Double spotLtpTrendPercent) { this.spotLtpTrendPercent = spotLtpTrendPercent; }
+
+    public String getSpotLtpTrendDirection() { return spotLtpTrendDirection; }
+    public void setSpotLtpTrendDirection(String spotLtpTrendDirection) { this.spotLtpTrendDirection = spotLtpTrendDirection; }
 
     // Helper methods
     public void addFutures(DerivativeContract contract) {
