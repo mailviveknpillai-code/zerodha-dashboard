@@ -119,3 +119,6 @@ Write-Host "  3. .\build-exe.ps1" -ForegroundColor White
 Write-Host "`nThe backend JAR now includes the frontend!" -ForegroundColor Yellow
 
 
+
+
+

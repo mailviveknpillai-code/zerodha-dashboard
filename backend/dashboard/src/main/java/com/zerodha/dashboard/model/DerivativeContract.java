@@ -32,6 +32,12 @@ public class DerivativeContract {
     private BigDecimal tickSize;
     private Long bidQuantity;
     private Long askQuantity;
+    private Long eatenDelta; // Eaten Δ = ask_eaten_window - bid_eaten_window
+    private Long bidEaten; // Bid Eaten = total bid quantity consumed in rolling window
+    private Long askEaten; // Ask Eaten = total ask quantity consumed in rolling window
+    private String ltpMovementDirection; // LTP Movement Direction: UP, DOWN, NEUTRAL
+    private Integer ltpMovementConfidence; // LTP Movement Confidence: 0-100
+    private String ltpMovementIntensity; // LTP Movement Intensity: HIGH, SLOW
     @JsonFormat(shape = JsonFormat.Shape.STRING)
     private Instant timestamp;
 
@@ -121,6 +127,24 @@ public class DerivativeContract {
 
     public Long getAskQuantity() { return askQuantity; }
     public void setAskQuantity(Long askQuantity) { this.askQuantity = askQuantity; }
+
+    public Long getEatenDelta() { return eatenDelta; }
+    public void setEatenDelta(Long eatenDelta) { this.eatenDelta = eatenDelta; }
+
+    public Long getBidEaten() { return bidEaten; }
+    public void setBidEaten(Long bidEaten) { this.bidEaten = bidEaten; }
+
+    public Long getAskEaten() { return askEaten; }
+    public void setAskEaten(Long askEaten) { this.askEaten = askEaten; }
+
+    public String getLtpMovementDirection() { return ltpMovementDirection; }
+    public void setLtpMovementDirection(String ltpMovementDirection) { this.ltpMovementDirection = ltpMovementDirection; }
+
+    public Integer getLtpMovementConfidence() { return ltpMovementConfidence; }
+    public void setLtpMovementConfidence(Integer ltpMovementConfidence) { this.ltpMovementConfidence = ltpMovementConfidence; }
+
+    public String getLtpMovementIntensity() { return ltpMovementIntensity; }
+    public void setLtpMovementIntensity(String ltpMovementIntensity) { this.ltpMovementIntensity = ltpMovementIntensity; }
 
     public Instant getTimestamp() { return timestamp; }
     public void setTimestamp(Instant timestamp) { this.timestamp = timestamp; }

@@ -7,6 +7,8 @@ import com.zerodha.dashboard.service.LatestSnapshotCacheService;
 import com.zerodha.dashboard.service.MockDataService;
 import com.zerodha.dashboard.service.ZerodhaSessionService;
 import com.zerodha.dashboard.service.DynamicCacheUpdateScheduler;
+import com.zerodha.dashboard.service.EatenDeltaService;
+import com.zerodha.dashboard.service.LtpMovementService;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
@@ -50,6 +52,8 @@ public class RealDerivativesController {
     private final ZerodhaSessionService zerodhaSessionService;
     private final LatestSnapshotCacheService latestSnapshotCacheService;
     private final DynamicCacheUpdateScheduler dynamicCacheUpdateScheduler;
+    private final EatenDeltaService eatenDeltaService;
+    private final LtpMovementService ltpMovementService;
     
     // Executor service for async cache updates (non-blocking)
     private final ExecutorService cacheUpdateExecutor = Executors.newFixedThreadPool(2);
@@ -68,13 +72,17 @@ public class RealDerivativesController {
                                      MockDataService mockDataService,
                                      ZerodhaSessionService zerodhaSessionService,
                                      LatestSnapshotCacheService latestSnapshotCacheService,
-                                     DynamicCacheUpdateScheduler dynamicCacheUpdateScheduler) {
+                                     DynamicCacheUpdateScheduler dynamicCacheUpdateScheduler,
+                                     EatenDeltaService eatenDeltaService,
+                                     LtpMovementService ltpMovementService) {
         this.breezeApiAdapter = breezeApiAdapter;
         this.zerodhaApiAdapter = zerodhaApiAdapter;
         this.mockDataService = mockDataService;
         this.zerodhaSessionService = zerodhaSessionService;
         this.latestSnapshotCacheService = latestSnapshotCacheService;
         this.dynamicCacheUpdateScheduler = dynamicCacheUpdateScheduler;
+        this.eatenDeltaService = eatenDeltaService;
+        this.ltpMovementService = ltpMovementService;
     }
 
     /**
@@ -141,6 +149,10 @@ public class RealDerivativesController {
             
             if (derivativesChain.isPresent()) {
                 DerivativesChain chain = derivativesChain.get();
+                
+                // Calculate eaten delta for all contracts
+                calculateEatenDeltaForChain(chain);
+                
                 // Update cache atomically with the latest snapshot
                 latestSnapshotCacheService.updateCache(chain);
                 log.info("Successfully fetched real derivatives chain with {} total contracts using {}", 
@@ -328,18 +340,25 @@ public class RealDerivativesController {
     }
     
     /**
-     * Get the latest snapshot with live data from Zerodha API.
+     * Get the latest snapshot from cache ONLY (ultra-fast endpoint for UI refresh).
      * GET /api/latest?underlying=NIFTY
      * 
+     * IMPORTANT: This endpoint does NOT trigger API calls. It only returns cached data.
+     * API polling is handled by DynamicCacheUpdateScheduler at the configured polling interval.
+     * 
      * This endpoint:
-     * 1. Attempts to fetch live data from Zerodha API
-     * 2. If successful, returns live data immediately and updates cache in parallel
-     * 3. If Zerodha API fails, falls back to cached data
-     * 4. If cache also fails, returns empty chain
+     * 1. Returns cached data from Redis (fast, no external API calls)
+     * 2. Recalculates eatenDelta and LTP movement (these are computed from cached bid/ask/LTP values)
+     * 3. If cache is empty, returns empty chain
+     * 
+     * This ensures:
+     * - UI refresh rate does NOT trigger Zerodha API calls
+     * - Backend scheduler handles all API polling at the configured interval
+     * - Frontend can poll this endpoint frequently without crashing
      */
     @GetMapping("/latest")
     public ResponseEntity<?> getLatest(@RequestParam(value = "underlying", defaultValue = "NIFTY") String underlying) {
-        log.debug("latest request received for underlying='{}'", underlying);
+        log.debug("latest request received for underlying='{}' (cache-only, no API calls)", underlying);
         
         String normalizedUnderlying = sanitizeUnderlying(underlying);
         if (normalizedUnderlying == null) {
@@ -347,50 +366,19 @@ public class RealDerivativesController {
         }
         
         try {
-            // Step 1: Try to fetch live data from Zerodha API
-            Optional<DerivativesChain> liveData = Optional.empty();
-            if (zerodhaEnabled && zerodhaSessionService.hasActiveAccessToken()) {
-                try {
-                    log.debug("Attempting to fetch live data from Zerodha API for underlying='{}'", normalizedUnderlying);
-                    liveData = zerodhaApiAdapter.getDerivativesChain(normalizedUnderlying);
-                    
-                    if (liveData.isPresent()) {
-                        DerivativesChain chain = liveData.get();
-                        chain.setDataSource("ZERODHA_KITE");
-                        
-                        // Update cache in parallel (non-blocking)
-                        // Use executor service to avoid blocking the response
-                        cacheUpdateExecutor.submit(() -> {
-                            try {
-                                latestSnapshotCacheService.updateCache(chain);
-                                log.debug("Cache updated with live data for underlying='{}'", normalizedUnderlying);
-                            } catch (Exception e) {
-                                log.warn("Failed to update cache in background: {}", e.getMessage());
-                            }
-                        });
-                        
-                        log.debug("Returning live data from Zerodha API for underlying='{}' with {} contracts", 
-                                normalizedUnderlying, chain.getTotalContracts());
-                        return ResponseEntity.ok(chain);
-                    } else {
-                        log.debug("Zerodha API returned no data for underlying='{}', falling back to cache", normalizedUnderlying);
-                    }
-                } catch (Exception e) {
-                    log.warn("Error fetching live data from Zerodha API for underlying='{}': {}. Falling back to cache.", 
-                            normalizedUnderlying, e.getMessage());
-                    // Continue to cache fallback
-                }
-            } else {
-                log.debug("Zerodha not enabled or session not active, falling back to cache");
-            }
-            
-            // Step 2: Fallback to cache if live data fetch failed or unavailable
+            // ONLY return cached data - do NOT trigger API calls
+            // API polling is handled separately by DynamicCacheUpdateScheduler
+            // CRITICAL: Do NOT recalculate eatenDelta or LTP movement here
+            // These values are already calculated and stored in the cache by DynamicCacheUpdateScheduler
+            // The calculation window is independent and runs at API polling rate, not UI refresh rate
             Optional<DerivativesChain> cached = latestSnapshotCacheService.getLatest();
             if (cached.isPresent()) {
                 DerivativesChain chain = cached.get();
                 // Verify underlying matches (for future multi-underlying support)
                 if (normalizedUnderlying.equals(chain.getUnderlying())) {
-                    log.debug("Returning cached snapshot for underlying='{}' with {} contracts (live data unavailable)", 
+                    // Return cached data as-is - eatenDelta and LTP movement are already calculated
+                    // The calculation window runs independently at API polling rate
+                    log.debug("Returning cached snapshot for underlying='{}' with {} contracts (cache-only, no API calls, no recalculation - values already calculated at API polling rate)", 
                             normalizedUnderlying, chain.getTotalContracts());
                     return ResponseEntity.ok(chain);
                 } else {
@@ -415,7 +403,8 @@ public class RealDerivativesController {
                 if (cached.isPresent()) {
                     DerivativesChain chain = cached.get();
                     if (normalizedUnderlying.equals(chain.getUnderlying())) {
-                        log.info("Returning cached data as fallback after error");
+                        // Return cached data as-is - values already calculated at API polling rate
+                        log.info("Returning cached data as fallback after error (no recalculation)");
                         return ResponseEntity.ok(chain);
                     }
                 }
@@ -428,13 +417,13 @@ public class RealDerivativesController {
     }
     
     /**
-     * Update the cache update interval (backend polling rate).
-     * PUT /api/refresh-interval
+     * Update the API polling interval for backend cache updates.
+     * PUT /api/api-polling-interval
      * Body: { "intervalMs": 1000 }
      */
     @CrossOrigin(origins = "*", methods = {RequestMethod.PUT, RequestMethod.OPTIONS})
-    @PutMapping("/refresh-interval")
-    public ResponseEntity<?> updateRefreshInterval(@RequestBody Map<String, Object> request) {
+    @PutMapping("/api-polling-interval")
+    public ResponseEntity<?> updateApiPollingInterval(@RequestBody Map<String, Object> request) {
         try {
             Object intervalObj = request.get("intervalMs");
             if (intervalObj == null) {
@@ -452,32 +441,89 @@ public class RealDerivativesController {
                 return ResponseEntity.badRequest().body(Map.of("error", "Interval must be at least 250ms"));
             }
             
+            long oldInterval = dynamicCacheUpdateScheduler.getCurrentInterval();
+            log.info("API endpoint: Updating API polling interval from {}ms ({}s) to {}ms ({}s)", 
+                oldInterval, oldInterval / 1000.0, intervalMs, intervalMs / 1000.0);
+            
+            if (intervalMs < 1500) {
+                log.warn("API endpoint: WARNING - API polling interval {}ms ({}s) is below 1.5s - may cause crashes", 
+                    intervalMs, intervalMs / 1000.0);
+            }
+            
             dynamicCacheUpdateScheduler.updateInterval(intervalMs);
-            log.info("Updated cache update interval to {}ms", intervalMs);
+            
+            long newInterval = dynamicCacheUpdateScheduler.getCurrentInterval();
+            log.info("API endpoint: Successfully updated API polling interval to {}ms ({}s)", 
+                newInterval, newInterval / 1000.0);
             
             return ResponseEntity.ok(Map.of(
                 "success", true,
                 "intervalMs", intervalMs,
-                "message", "Cache update interval updated successfully"
+                "message", "API polling interval updated successfully"
             ));
         } catch (Exception e) {
-            log.error("Error updating refresh interval: {}", e.getMessage(), e);
+            log.error("Error updating API polling interval: {}", e.getMessage(), e);
             return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
         }
     }
     
     /**
-     * Get the current cache update interval.
-     * GET /api/refresh-interval
+     * Get the current API polling interval.
+     * GET /api/api-polling-interval
      */
     @CrossOrigin(origins = "*")
-    @GetMapping("/refresh-interval")
-    public ResponseEntity<?> getRefreshInterval() {
+    @GetMapping("/api-polling-interval")
+    public ResponseEntity<?> getApiPollingInterval() {
         try {
             long intervalMs = dynamicCacheUpdateScheduler.getCurrentInterval();
             return ResponseEntity.ok(Map.of("intervalMs", intervalMs));
         } catch (Exception e) {
-            log.error("Error getting refresh interval: {}", e.getMessage(), e);
+            log.error("Error getting API polling interval: {}", e.getMessage(), e);
+            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+        }
+    }
+    
+    /**
+     * Legacy endpoint - kept for backward compatibility
+     * Update the cache update interval (backend polling rate).
+     * PUT /api/refresh-interval
+     * Body: { "intervalMs": 1000 }
+     * @deprecated Use /api/api-polling-interval instead
+     */
+    @Deprecated
+    @CrossOrigin(origins = "*", methods = {RequestMethod.PUT, RequestMethod.OPTIONS})
+    @PutMapping("/refresh-interval")
+    public ResponseEntity<?> updateRefreshInterval(@RequestBody Map<String, Object> request) {
+        // Redirect to new endpoint
+        return updateApiPollingInterval(request);
+    }
+    
+    /**
+     * Legacy endpoint - kept for backward compatibility
+     * Get the current cache update interval.
+     * GET /api/refresh-interval
+     * @deprecated Use /api/api-polling-interval instead
+     */
+    @Deprecated
+    @CrossOrigin(origins = "*")
+    @GetMapping("/refresh-interval")
+    public ResponseEntity<?> getRefreshInterval() {
+        // Redirect to new endpoint
+        return getApiPollingInterval();
+    }
+    
+    /**
+     * Get API polling status and warnings.
+     * GET /api/api-polling-status
+     */
+    @CrossOrigin(origins = "*")
+    @GetMapping("/api-polling-status")
+    public ResponseEntity<?> getApiPollingStatus() {
+        try {
+            Map<String, Object> status = dynamicCacheUpdateScheduler.getApiPollingStatus();
+            return ResponseEntity.ok(status);
+        } catch (Exception e) {
+            log.error("Error getting API polling status: {}", e.getMessage(), e);
             return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
         }
     }
@@ -588,5 +634,177 @@ public class RealDerivativesController {
         body.put("error", "INVALID_" + field.toUpperCase());
         body.put("message", message);
         return ResponseEntity.badRequest().body(body);
+    }
+    
+    /**
+     * Calculate eaten delta for all contracts in the chain.
+     * This is called on every tick to update the eaten delta values.
+     */
+    private void calculateEatenDeltaForChain(DerivativesChain chain) {
+        if (chain == null) {
+            log.warn("calculateEatenDeltaForChain: chain is null");
+            return;
+        }
+        
+        int futuresCount = 0;
+        int callOptionsCount = 0;
+        int putOptionsCount = 0;
+        int errorsCount = 0;
+        
+        try {
+            // Process futures
+            if (chain.getFutures() != null) {
+                for (com.zerodha.dashboard.model.DerivativeContract contract : chain.getFutures()) {
+                    try {
+                        // calculateEatenDelta sets eatenDelta, bidEaten, and askEaten on the contract
+                        eatenDeltaService.calculateEatenDelta(contract);
+                        // Values are already set on contract by calculateEatenDelta
+                        futuresCount++;
+                    } catch (Exception e) {
+                        log.error("Error calculating eatenDelta for futures contract {}: {}", 
+                            contract != null ? contract.getInstrumentToken() : "null", e.getMessage(), e);
+                        errorsCount++;
+                        // Set to 0 on error for all eaten values
+                        if (contract != null) {
+                            contract.setEatenDelta(0L);
+                            contract.setBidEaten(0L);
+                            contract.setAskEaten(0L);
+                        }
+                    }
+                }
+            }
+            
+            // Process call options
+            if (chain.getCallOptions() != null) {
+                for (com.zerodha.dashboard.model.DerivativeContract contract : chain.getCallOptions()) {
+                    try {
+                        // calculateEatenDelta sets eatenDelta, bidEaten, and askEaten on the contract
+                        eatenDeltaService.calculateEatenDelta(contract);
+                        // Values are already set on contract by calculateEatenDelta
+                        callOptionsCount++;
+                    } catch (Exception e) {
+                        log.error("Error calculating eatenDelta for call option {}: {}", 
+                            contract != null ? contract.getInstrumentToken() : "null", e.getMessage(), e);
+                        errorsCount++;
+                        // Set to 0 on error for all eaten values
+                        if (contract != null) {
+                            contract.setEatenDelta(0L);
+                            contract.setBidEaten(0L);
+                            contract.setAskEaten(0L);
+                        }
+                    }
+                }
+            }
+            
+            // Process put options
+            if (chain.getPutOptions() != null) {
+                for (com.zerodha.dashboard.model.DerivativeContract contract : chain.getPutOptions()) {
+                    try {
+                        // calculateEatenDelta sets eatenDelta, bidEaten, and askEaten on the contract
+                        eatenDeltaService.calculateEatenDelta(contract);
+                        // Values are already set on contract by calculateEatenDelta
+                        putOptionsCount++;
+                    } catch (Exception e) {
+                        log.error("Error calculating eatenDelta for put option {}: {}", 
+                            contract != null ? contract.getInstrumentToken() : "null", e.getMessage(), e);
+                        errorsCount++;
+                        // Set to 0 on error for all eaten values
+                        if (contract != null) {
+                            contract.setEatenDelta(0L);
+                            contract.setBidEaten(0L);
+                            contract.setAskEaten(0L);
+                        }
+                    }
+                }
+            }
+            
+            log.debug("calculateEatenDeltaForChain completed: futures={}, calls={}, puts={}, errors={}", 
+                futuresCount, callOptionsCount, putOptionsCount, errorsCount);
+        } catch (Exception e) {
+            log.error("Fatal error in calculateEatenDeltaForChain: {}", e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * Calculate LTP movement for all contracts in the chain.
+     * This is called on every request to update the LTP movement values.
+     */
+    private void calculateLtpMovementForChain(DerivativesChain chain) {
+        if (chain == null) {
+            log.warn("calculateLtpMovementForChain: chain is null");
+            return;
+        }
+        
+        int futuresCount = 0;
+        int callOptionsCount = 0;
+        int putOptionsCount = 0;
+        int errorsCount = 0;
+        
+        try {
+            // Process futures
+            if (chain.getFutures() != null) {
+                for (com.zerodha.dashboard.model.DerivativeContract contract : chain.getFutures()) {
+                    try {
+                        ltpMovementService.calculateLtpMovement(contract);
+                        futuresCount++;
+                    } catch (Exception e) {
+                        log.error("Error calculating LTP movement for futures contract {}: {}", 
+                            contract != null ? contract.getInstrumentToken() : "null", e.getMessage(), e);
+                        errorsCount++;
+                        // Set defaults on error
+                        if (contract != null) {
+                            contract.setLtpMovementDirection("NEUTRAL");
+                            contract.setLtpMovementConfidence(0);
+                            contract.setLtpMovementIntensity("SLOW");
+                        }
+                    }
+                }
+            }
+            
+            // Process call options
+            if (chain.getCallOptions() != null) {
+                for (com.zerodha.dashboard.model.DerivativeContract contract : chain.getCallOptions()) {
+                    try {
+                        ltpMovementService.calculateLtpMovement(contract);
+                        callOptionsCount++;
+                    } catch (Exception e) {
+                        log.error("Error calculating LTP movement for call option {}: {}", 
+                            contract != null ? contract.getInstrumentToken() : "null", e.getMessage(), e);
+                        errorsCount++;
+                        // Set defaults on error
+                        if (contract != null) {
+                            contract.setLtpMovementDirection("NEUTRAL");
+                            contract.setLtpMovementConfidence(0);
+                            contract.setLtpMovementIntensity("SLOW");
+                        }
+                    }
+                }
+            }
+            
+            // Process put options
+            if (chain.getPutOptions() != null) {
+                for (com.zerodha.dashboard.model.DerivativeContract contract : chain.getPutOptions()) {
+                    try {
+                        ltpMovementService.calculateLtpMovement(contract);
+                        putOptionsCount++;
+                    } catch (Exception e) {
+                        log.error("Error calculating LTP movement for put option {}: {}", 
+                            contract != null ? contract.getInstrumentToken() : "null", e.getMessage(), e);
+                        errorsCount++;
+                        // Set defaults on error
+                        if (contract != null) {
+                            contract.setLtpMovementDirection("NEUTRAL");
+                            contract.setLtpMovementConfidence(0);
+                            contract.setLtpMovementIntensity("SLOW");
+                        }
+                    }
+                }
+            }
+            
+            log.debug("calculateLtpMovementForChain completed: futures={}, calls={}, puts={}, errors={}", 
+                futuresCount, callOptionsCount, putOptionsCount, errorsCount);
+        } catch (Exception e) {
+            log.error("Fatal error in calculateLtpMovementForChain: {}", e.getMessage(), e);
+        }
     }
 }

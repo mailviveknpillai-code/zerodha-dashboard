@@ -6,7 +6,6 @@ import {
   REFRESH_INTERVAL_STEP_MS,
   REFRESH_INTERVAL_OPTIONS,
 } from '../constants';
-import { updateBackendRefreshInterval, getBackendRefreshInterval } from '../api/client';
 import logger from '../utils/logger';
 
 const STORAGE_KEY = 'dashboard:refreshIntervalMs';
@@ -38,59 +37,26 @@ export function RefreshIntervalProvider({ children }) {
 
   const setIntervalMs = useCallback(async (nextValue) => {
     const clamped = clampInterval(nextValue);
+    const oldValue = intervalMs;
     setIntervalMsState(clamped);
     try {
       if (typeof window !== 'undefined') {
         window.localStorage.setItem(STORAGE_KEY, String(clamped));
       }
-      
-      // Update backend polling interval to match frontend
-      try {
-        await updateBackendRefreshInterval(clamped);
-        logger.info('[RefreshIntervalContext] Updated backend refresh interval', { intervalMs: clamped });
-      } catch (error) {
-        logger.error('[RefreshIntervalContext] Failed to update backend refresh interval', { error, intervalMs: clamped });
-        // Don't throw - frontend will still work with local interval
-      }
+      // UI refresh rate is now independent - no backend sync needed
+      logger.info('[RefreshIntervalContext] Updated UI refresh interval', { 
+        oldIntervalMs: oldValue,
+        newIntervalMs: clamped,
+        oldIntervalSeconds: oldValue / 1000,
+        newIntervalSeconds: clamped / 1000
+      });
     } catch (error) {
       console.warn('Unable to persist refresh interval preference:', error);
     }
-  }, []);
+  }, [intervalMs]);
 
-  useEffect(() => {
-    // Sync with backend on mount
-    const syncWithBackend = async () => {
-      try {
-        const backendInterval = await getBackendRefreshInterval();
-        if (backendInterval?.intervalMs) {
-          const backendValue = backendInterval.intervalMs;
-          const clamped = clampInterval(backendValue);
-          if (clamped !== intervalMs) {
-            logger.info('[RefreshIntervalContext] Syncing with backend interval', { 
-              frontend: intervalMs, 
-              backend: backendValue,
-              clamped 
-            });
-            setIntervalMsState(clamped);
-            if (typeof window !== 'undefined') {
-              window.localStorage.setItem(STORAGE_KEY, String(clamped));
-            }
-          } else {
-            // Backend matches frontend, but ensure backend is updated
-            await updateBackendRefreshInterval(clamped);
-          }
-        } else {
-          // No backend interval, update backend with current frontend value
-          await updateBackendRefreshInterval(intervalMs);
-        }
-      } catch (error) {
-        logger.warn('[RefreshIntervalContext] Failed to sync with backend', { error });
-        // Continue with local value if backend sync fails
-      }
-    };
-    
-    syncWithBackend();
-  }, []); // intentionally run once
+  // UI refresh rate is now independent - no backend sync needed
+  // Removed backend sync logic
 
   const value = useMemo(() => ({
     intervalMs,

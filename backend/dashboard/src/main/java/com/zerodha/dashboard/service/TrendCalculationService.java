@@ -6,29 +6,30 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.*;
 
 /**
  * Service to calculate market trend indicator.
  * 
- * MATCHES EXACTLY the release/v1.1.0-clean useMarketTrend.js logic.
+ * USES DISCRETE WINDOW INTERVAL CALCULATION:
+ * - Calculates trend for a fixed time window (e.g., 0-5s)
+ * - Displays the calculated result for the entire NEXT window (5-10s)
+ * - Ensures smooth transitions between windows
  * 
- * IMPORTANT: This calculation uses API polled values at API polling intervals.
- * The calculation uses a FIFO cache for the configured window size.
- * The UI displays the trend at frontend refresh rate but the calculation
- * happens only at API polling intervals.
+ * The calculation uses API polled values at API polling intervals.
+ * The UI displays the trend at frontend refresh rate.
  */
 @Service
 public class TrendCalculationService {
     
     private static final Logger log = LoggerFactory.getLogger(TrendCalculationService.class);
     
-    // Smoothing parameters (matching release)
+    // Smoothing parameters
     private static final int SMOOTHING_CYCLES = 3;
     private static final int SMOOTHING_MAJORITY = 2;
     
-    // Weights for different metrics (matching release)
+    // Weights for different metrics
     private static final double WEIGHT_LTP = 1.0;
     private static final double WEIGHT_VOL = 0.7;
     private static final double WEIGHT_BID = 0.7;
@@ -46,14 +47,18 @@ public class TrendCalculationService {
     private static final double BEARISH_CALLS_WEIGHT = 0.20;
     private static final double BEARISH_PUTS_WEIGHT = 0.35;
     
-    // Configurable window size (number of API polls to keep in cache)
-    private volatile int windowSize = 5;
+    // Configurable window size in seconds (discrete time windows)
+    // Default matches frontend default in TrendAveragingContext.jsx
+    private volatile int windowSeconds = 10;
     
     // Configurable thresholds
     private volatile double bullishThreshold = 3.0;
     private volatile double bearishThreshold = -3.0;
     
-    // FIFO caches for each segment (exactly like release version)
+    // Window tracking for discrete intervals (aligned to window boundaries)
+    private volatile Instant windowStartTime = null;
+    
+    // Caches for current window calculation (FIFO within each window)
     private final Map<String, List<Double>> futuresCache = new HashMap<>();
     private final Map<String, List<Double>> callsCache = new HashMap<>();
     private final Map<String, List<Double>> putsCache = new HashMap<>();
@@ -61,12 +66,38 @@ public class TrendCalculationService {
     // Classification history for smoothing
     private final Deque<String> classificationHistory = new ArrayDeque<>();
     
-    // Current trend result
+    /**
+     * COMPLETED WINDOW RESULT - Result from PREVIOUS completed window (DISPLAYED IN UI)
+     * This is what the frontend shows - stable until next window completes.
+     * 
+     * Example with 5s window:
+     * - 0-5s: Calculate currentClassification/Score, display completedClassification/Score (initially Neutral/0)
+     * - At 5s: Window completes, store current → completed, display the new completed value
+     * - 5-10s: Calculate new current values, display completed (stable)
+     */
+    private volatile String completedClassification = "Neutral";
+    private volatile double completedScore = 0.0;
+    private volatile double completedFuturesScore = 0.0;
+    private volatile double completedCallsScore = 0.0;
+    private volatile double completedPutsScore = 0.0;
+    
+    /**
+     * CURRENT WINDOW RESULT - Running calculation for CURRENT window (NOT displayed until window completes)
+     * These values are being calculated but not shown to the UI yet.
+     */
     private volatile String currentClassification = "Neutral";
     private volatile double currentScore = 0.0;
+    private volatile double currentFuturesScore = 0.0;
+    private volatile double currentCallsScore = 0.0;
+    private volatile double currentPutsScore = 0.0;
+    
+    /**
+     * Track if we've completed at least one window.
+     * Before the first window completes, we show the current calculation (like eaten delta does).
+     */
+    private volatile boolean hasCompletedWindow = false;
     
     public TrendCalculationService() {
-        // Initialize caches
         initializeCache(futuresCache);
         initializeCache(callsCache);
         initializeCache(putsCache);
@@ -82,26 +113,34 @@ public class TrendCalculationService {
     }
     
     /**
-     * Set window size (number of API polls to keep in cache).
+     * Set window size in seconds (discrete time windows).
      */
-    public void setWindowSeconds(int size) {
-        if (size <= 0) {
-            log.warn("Invalid window size: {}, using default 5", size);
-            size = 5;
+    public void setWindowSeconds(int seconds) {
+        if (seconds <= 0) {
+            log.warn("Invalid window size: {}, using default 5", seconds);
+            seconds = 5;
         }
-        int oldSize = this.windowSize;
-        this.windowSize = size;
+        int oldSize = this.windowSeconds;
+        this.windowSeconds = seconds;
         
-        // Clear caches when window size changes (matching release behavior)
-        if (oldSize != size) {
+        if (oldSize != seconds) {
+            // Reset window tracking when size changes
+            windowStartTime = null;
             clearAllCaches();
             classificationHistory.clear();
-            log.info("Trend calculation window size changed from {} to {} - caches cleared", oldSize, size);
+            // Reset current calculation for new window
+            currentClassification = "Neutral";
+            currentScore = 0.0;
+            // Reset window completion flag - treat as new first window
+            hasCompletedWindow = false;
+            // DON'T clear completedClassification/Score - keep displaying last result for smooth transition
+            log.info("TREND WINDOW SIZE CHANGED: {}s -> {}s. Window tracking reset. hasCompletedWindow=false. Display: {} ({})", 
+                oldSize, seconds, completedClassification, String.format("%.2f", completedScore));
         }
     }
     
     public int getWindowSeconds() {
-        return windowSize;
+        return windowSeconds;
     }
     
     public void setBullishThreshold(double threshold) {
@@ -134,7 +173,16 @@ public class TrendCalculationService {
     
     /**
      * Calculate trend for a derivatives chain.
-     * Called on every API poll to update the cache and recalculate trend.
+     * Uses discrete time windows - calculates for window N, displays result during window N+1.
+     * 
+     * FOLLOWS SAME PATTERN AS EatenDeltaService:
+     * - completedClassification/Score: Result from PREVIOUS completed window (displayed in UI)
+     * - currentClassification/Score: Running calculation for CURRENT window (not displayed until window completes)
+     * 
+     * Example with 5s window:
+     * - 0-5s: Calculate currentScore, display completedScore (initially 0)
+     * - At 5s: Window completes, store current → completed, display new value
+     * - 5-10s: Calculate new currentScore, display completedScore (stable)
      */
     public void calculateTrend(DerivativesChain chain) {
         if (chain == null) {
@@ -143,180 +191,300 @@ public class TrendCalculationService {
         }
         
         try {
-            // Step 1: Extract current metrics from each segment
+            Instant now = Instant.now();
+            long epochSecond = now.getEpochSecond();
+            long currentWindowNumber = epochSecond / windowSeconds;
+            
+            // Initialize window start time if not set (aligned to discrete boundary)
+            if (windowStartTime == null) {
+                long windowNumber = epochSecond / windowSeconds;
+                windowStartTime = Instant.ofEpochSecond(windowNumber * windowSeconds);
+                log.info("TREND: Initialized window start to {} (aligned to {}s boundary, window #{})", 
+                    windowStartTime, windowSeconds, windowNumber);
+            }
+            
+            // Calculate window boundaries
+            long windowStartNumber = windowStartTime.getEpochSecond() / windowSeconds;
+            
+            // Check if we've moved to a new window
+            boolean windowChanged = currentWindowNumber > windowStartNumber;
+            
+            // If we've missed windows (e.g., API polling was delayed), log it
+            if (windowChanged && (currentWindowNumber - windowStartNumber) > 1) {
+                long windowsMissed = currentWindowNumber - windowStartNumber - 1;
+                log.warn("TREND: Missed {} window(s) - jumped from window {} to {}. This may cause delayed updates.", 
+                    windowsMissed, windowStartNumber, currentWindowNumber);
+            }
+            
+            // Log window changes for debugging
+            if (windowChanged) {
+                log.info("TREND: Window change - epochSecond={}, window {} -> {}, windowSeconds={}", 
+                    epochSecond, windowStartNumber, currentWindowNumber, windowSeconds);
+            }
+            
+            if (windowChanged) {
+                // Window completed! Commit current result as completed result
+                log.info("TREND WINDOW CHANGE: Window {} completed at epoch {}. Committing score: {} ({}). Window size: {}s",
+                    windowStartNumber, now.getEpochSecond(), currentClassification, String.format("%.2f", currentScore), windowSeconds);
+                
+                commitWindowResult();
+                
+                // Start new window (aligned to boundary)
+                long newWindowStart = currentWindowNumber * windowSeconds;
+                windowStartTime = Instant.ofEpochSecond(newWindowStart);
+                
+                // Clear caches for new window
+                clearAllCaches();
+                
+                // Reset current calculation for new window
+                currentClassification = "Neutral";
+                currentScore = 0.0;
+                currentFuturesScore = 0.0;
+                currentCallsScore = 0.0;
+                currentPutsScore = 0.0;
+                
+                log.info("TREND WINDOW CHANGE: New window started: {}s-{}s (window #{}). Display now: {} ({})", 
+                    newWindowStart, newWindowStart + windowSeconds, currentWindowNumber,
+                    completedClassification, String.format("%.2f", completedScore));
+            }
+            
+            // Extract and cache current metrics
             Metrics futuresMetrics = extractMetrics(chain.getFutures());
             Metrics callsMetrics = extractMetrics(chain.getCallOptions());
             Metrics putsMetrics = extractMetrics(chain.getPutOptions());
             
-            // Step 2: Update caches with current values (FIFO)
-            boolean cacheUpdated = false;
+            // Update caches with current values
             if (futuresMetrics != null) {
                 updateCache(futuresCache, futuresMetrics);
-                cacheUpdated = true;
             }
             if (callsMetrics != null) {
                 updateCache(callsCache, callsMetrics);
-                cacheUpdated = true;
             }
             if (putsMetrics != null) {
                 updateCache(putsCache, putsMetrics);
-                cacheUpdated = true;
             }
             
-            if (!cacheUpdated) {
-                log.debug("calculateTrend: No valid metrics to update cache");
-                return;
+            // Store previous values before calculating
+            double previousCurrentScore = currentScore;
+            String previousCurrentClassification = currentClassification;
+            
+            // Calculate trend for current window (updates currentClassification/Score)
+            // These are NOT displayed yet - only completedClassification/Score are displayed
+            calculateCurrentWindowTrend(futuresMetrics, callsMetrics, putsMetrics);
+            
+            // If calculation returned 0 due to insufficient data (only 1 point in cache),
+            // preserve the previous non-zero value to avoid oscillation
+            int cacheSize = Math.max(
+                futuresCache.get("ltp").size(),
+                Math.max(callsCache.get("ltp").size(), putsCache.get("ltp").size())
+            );
+            if (cacheSize <= 1 && currentScore == 0.0 && previousCurrentScore != 0.0) {
+                // Not enough data to calculate meaningful score - preserve previous
+                currentScore = previousCurrentScore;
+                currentClassification = previousCurrentClassification;
+                log.debug("calculateTrend: Insufficient data (cacheSize={}), preserving previous score: {} ({})",
+                    cacheSize, currentClassification, String.format("%.2f", currentScore));
             }
             
-            // Step 3: Check if we have enough data (matching release: all 3 segments need full cache)
-            boolean hasEnoughData = 
-                futuresCache.get("ltp").size() >= windowSize &&
-                callsCache.get("ltp").size() >= windowSize &&
-                putsCache.get("ltp").size() >= windowSize;
+            // Determine what to display
+            String displayClassification;
+            double displayScore;
             
-            if (!hasEnoughData) {
-                log.debug("calculateTrend: Not enough data yet - futures: {}/{}, calls: {}/{}, puts: {}/{}", 
-                    futuresCache.get("ltp").size(), windowSize,
-                    callsCache.get("ltp").size(), windowSize,
-                    putsCache.get("ltp").size(), windowSize);
-                // Keep existing trend if we have one
-                chain.setTrendClassification(currentClassification);
-                chain.setTrendScore(currentScore);
-                return;
-            }
-            
-            // Step 4: Get current metrics (need all 3 for calculation - matching release)
-            if (futuresMetrics == null || callsMetrics == null || putsMetrics == null) {
-                log.debug("calculateTrend: Missing current metrics for calculation");
-                chain.setTrendClassification(currentClassification);
-                chain.setTrendScore(currentScore);
-                return;
-            }
-            
-            // Step 5: Calculate segment scores (exactly like release)
-            double futuresScore = calculateSegmentScore(futuresMetrics, futuresCache, "futures");
-            double callsScore = calculateSegmentScore(callsMetrics, callsCache, "calls");
-            double putsScore = calculateSegmentScore(putsMetrics, putsCache, "puts");
-            
-            // Step 6: Calculate bullish and bearish scores with segment weights
-            double bullishScore = 
-                BULLISH_FUTURES_WEIGHT * futuresScore +
-                BULLISH_CALLS_WEIGHT * callsScore +
-                BULLISH_PUTS_WEIGHT * putsScore;
-            
-            double bearishScore = 
-                BEARISH_FUTURES_WEIGHT * futuresScore +
-                BEARISH_CALLS_WEIGHT * callsScore +
-                BEARISH_PUTS_WEIGHT * putsScore;
-            
-            // Step 7: Normalize scores to -10 to +10
-            double normalizedBullishScore = normalizeScore(bullishScore);
-            double normalizedBearishScore = normalizeScore(bearishScore);
-            
-            // Step 8: Determine classification using dual scoring logic
-            String classification;
-            double finalScore;
-            boolean bullishCrossed = normalizedBullishScore >= bullishThreshold;
-            boolean bearishCrossed = normalizedBearishScore <= bearishThreshold;
-            
-            if (bullishCrossed && bearishCrossed) {
-                // Both crossed - use the one with higher absolute value
-                if (Math.abs(normalizedBullishScore) > Math.abs(normalizedBearishScore)) {
-                    classification = "Bullish";
-                    finalScore = normalizedBullishScore;
-                } else if (Math.abs(normalizedBearishScore) > Math.abs(normalizedBullishScore)) {
-                    classification = "Bearish";
-                    finalScore = normalizedBearishScore;
-                } else {
-                    // Equal - prefer bullish
-                    classification = "Bullish";
-                    finalScore = normalizedBullishScore;
-                }
-            } else if (bullishCrossed) {
-                classification = "Bullish";
-                finalScore = normalizedBullishScore;
-            } else if (bearishCrossed) {
-                classification = "Bearish";
-                finalScore = normalizedBearishScore;
+            if (hasCompletedWindow) {
+                // After first window completes: ALWAYS show completed result (stable)
+                displayClassification = completedClassification;
+                displayScore = completedScore;
             } else {
-                // Neither crossed - use the score with higher absolute value for neutral
-                if (Math.abs(normalizedBullishScore) > Math.abs(normalizedBearishScore)) {
-                    classification = "Neutral";
-                    finalScore = normalizedBullishScore;
+                // Before first window completes: Show current calculation (like eaten delta)
+                // This gives immediate feedback rather than showing 0 for the entire first window
+                // But only if we have a meaningful value (not 0 from insufficient data)
+                if (currentScore != 0.0 || !"Neutral".equals(currentClassification)) {
+                    displayClassification = currentClassification;
+                    displayScore = currentScore;
                 } else {
-                    classification = "Neutral";
-                    finalScore = normalizedBearishScore;
+                    // No meaningful calculation yet - keep previous display value
+                    displayClassification = completedClassification;
+                    displayScore = completedScore;
                 }
             }
             
-            // Step 9: Apply smoothing (exactly like release)
-            classificationHistory.addLast(classification);
-            while (classificationHistory.size() > SMOOTHING_CYCLES) {
-                classificationHistory.removeFirst();
+            chain.setTrendClassification(displayClassification);
+            chain.setTrendScore(displayScore);
+            
+            // Set segment scores (use completed scores if window completed, otherwise current scores)
+            if (hasCompletedWindow) {
+                chain.setFuturesTrendScore(completedFuturesScore);
+                chain.setCallsTrendScore(completedCallsScore);
+                chain.setPutsTrendScore(completedPutsScore);
+            } else {
+                chain.setFuturesTrendScore(currentFuturesScore);
+                chain.setCallsTrendScore(currentCallsScore);
+                chain.setPutsTrendScore(currentPutsScore);
             }
-            
-            String finalClassification = classification;
-            
-            if (classificationHistory.size() >= SMOOTHING_CYCLES) {
-                // Count occurrences
-                Map<String, Integer> counts = new HashMap<>();
-                for (String c : classificationHistory) {
-                    counts.put(c, counts.getOrDefault(c, 0) + 1);
-                }
-                
-                // Find most common
-                String mostCommon = counts.entrySet().stream()
-                    .max(Map.Entry.comparingByValue())
-                    .map(Map.Entry::getKey)
-                    .orElse(classification);
-                
-                // Use majority if appears at least SMOOTHING_MAJORITY times
-                if (counts.getOrDefault(mostCommon, 0) >= SMOOTHING_MAJORITY) {
-                    finalClassification = mostCommon;
-                    
-                    // Recalculate score for majority classification
-                    if (!mostCommon.equals(classification)) {
-                        if (mostCommon.equals("Bullish")) {
-                            finalScore = normalizedBullishScore;
-                        } else if (mostCommon.equals("Bearish")) {
-                            finalScore = normalizedBearishScore;
-                        } else {
-                            finalScore = Math.abs(normalizedBullishScore) > Math.abs(normalizedBearishScore)
-                                ? normalizedBullishScore
-                                : normalizedBearishScore;
-                        }
-                    }
-                }
-            }
-            
-            // Step 10: Determine if we should update (matching release logic)
-            boolean shouldUpdate = 
-                bullishCrossed || bearishCrossed ||
-                classificationHistory.size() < SMOOTHING_CYCLES ||
-                finalClassification.equals(classification);
-            
-            if (shouldUpdate) {
-                currentClassification = finalClassification;
-                currentScore = finalScore;
-            }
-            
-            // Step 11: Update chain with calculated trend
-            chain.setTrendClassification(currentClassification);
-            chain.setTrendScore(currentScore);
-            
-            log.debug("calculateTrend: {} score={} (bullish={}, bearish={}, thresholds: b>={}, B<={})", 
-                currentClassification, 
-                String.format("%.2f", currentScore),
-                String.format("%.2f", normalizedBullishScore),
-                String.format("%.2f", normalizedBearishScore),
-                String.format("%.2f", bullishThreshold),
-                String.format("%.2f", bearishThreshold));
             
         } catch (Exception e) {
             log.error("Error calculating trend: {}", e.getMessage(), e);
-            // Keep existing trend on error
-            chain.setTrendClassification(currentClassification);
-            chain.setTrendScore(currentScore);
+            // Keep existing completed result on error
+            chain.setTrendClassification(completedClassification);
+            chain.setTrendScore(completedScore);
+            chain.setFuturesTrendScore(completedFuturesScore);
+            chain.setCallsTrendScore(completedCallsScore);
+            chain.setPutsTrendScore(completedPutsScore);
+        }
+    }
+    
+    /**
+     * Commit the current window result as the completed result.
+     * Called when a window boundary is crossed.
+     * 
+     * ALWAYS commits the current result (even if 0/Neutral) because:
+     * - The calculated value for window N should be displayed during window N+1
+     * - If the market is flat and score is 0, that's a valid result to display
+     */
+    private void commitWindowResult() {
+        // Store current result as completed result (this is what UI will display)
+        completedClassification = currentClassification;
+        completedScore = currentScore;
+        completedFuturesScore = currentFuturesScore;
+        completedCallsScore = currentCallsScore;
+        completedPutsScore = currentPutsScore;
+        
+        // Mark that we've completed at least one window
+        hasCompletedWindow = true;
+        
+        log.debug("commitWindowResult: Committed {} ({}) as completed window result", 
+            completedClassification, String.format("%.2f", completedScore));
+    }
+    
+    /**
+     * Calculate trend for the current window (updates currentClassification/Score).
+     */
+    private void calculateCurrentWindowTrend(Metrics futuresMetrics, Metrics callsMetrics, Metrics putsMetrics) {
+        // Check if we have any data in caches
+        boolean hasData = 
+            futuresCache.get("ltp").size() > 0 ||
+            callsCache.get("ltp").size() > 0 ||
+            putsCache.get("ltp").size() > 0;
+        
+        if (!hasData) {
+            log.debug("calculateCurrentWindowTrend: No data in caches yet");
+            return;
+        }
+        
+        // Need current metrics for calculation
+        if (futuresMetrics == null && callsMetrics == null && putsMetrics == null) {
+            log.debug("calculateCurrentWindowTrend: No current metrics");
+            return;
+        }
+        
+        // Calculate segment scores
+        double futuresScore = futuresMetrics != null && futuresCache.get("ltp").size() > 0
+            ? calculateSegmentScore(futuresMetrics, futuresCache, "futures") 
+            : 0.0;
+        double callsScore = callsMetrics != null && callsCache.get("ltp").size() > 0
+            ? calculateSegmentScore(callsMetrics, callsCache, "calls") 
+            : 0.0;
+        double putsScore = putsMetrics != null && putsCache.get("ltp").size() > 0
+            ? calculateSegmentScore(putsMetrics, putsCache, "puts") 
+            : 0.0;
+        
+        // Calculate bullish and bearish scores with segment weights
+        double bullishScore = 
+            BULLISH_FUTURES_WEIGHT * futuresScore +
+            BULLISH_CALLS_WEIGHT * callsScore +
+            BULLISH_PUTS_WEIGHT * putsScore;
+        
+        double bearishScore = 
+            BEARISH_FUTURES_WEIGHT * futuresScore +
+            BEARISH_CALLS_WEIGHT * callsScore +
+            BEARISH_PUTS_WEIGHT * putsScore;
+        
+        // Normalize scores to -10 to +10
+        double normalizedBullishScore = normalizeScore(bullishScore);
+        double normalizedBearishScore = normalizeScore(bearishScore);
+        
+        // Determine classification using dual scoring logic
+        String classification;
+        double finalScore;
+        boolean bullishCrossed = normalizedBullishScore >= bullishThreshold;
+        boolean bearishCrossed = normalizedBearishScore <= bearishThreshold;
+        
+        if (bullishCrossed && bearishCrossed) {
+            if (Math.abs(normalizedBullishScore) > Math.abs(normalizedBearishScore)) {
+                classification = "Bullish";
+                finalScore = normalizedBullishScore;
+            } else if (Math.abs(normalizedBearishScore) > Math.abs(normalizedBullishScore)) {
+                classification = "Bearish";
+                finalScore = normalizedBearishScore;
+            } else {
+                classification = "Bullish";
+                finalScore = normalizedBullishScore;
+            }
+        } else if (bullishCrossed) {
+            classification = "Bullish";
+            finalScore = normalizedBullishScore;
+        } else if (bearishCrossed) {
+            classification = "Bearish";
+            finalScore = normalizedBearishScore;
+        } else {
+            if (Math.abs(normalizedBullishScore) > Math.abs(normalizedBearishScore)) {
+                classification = "Neutral";
+                finalScore = normalizedBullishScore;
+            } else {
+                classification = "Neutral";
+                finalScore = normalizedBearishScore;
+            }
+        }
+        
+        // Apply smoothing
+        classificationHistory.addLast(classification);
+        while (classificationHistory.size() > SMOOTHING_CYCLES) {
+            classificationHistory.removeFirst();
+        }
+        
+        String finalClassification = classification;
+        
+        if (classificationHistory.size() >= SMOOTHING_CYCLES) {
+            Map<String, Integer> counts = new HashMap<>();
+            for (String c : classificationHistory) {
+                counts.put(c, counts.getOrDefault(c, 0) + 1);
+            }
+            
+            String mostCommon = counts.entrySet().stream()
+                .max(Map.Entry.comparingByValue())
+                .map(Map.Entry::getKey)
+                .orElse(classification);
+            
+            if (counts.getOrDefault(mostCommon, 0) >= SMOOTHING_MAJORITY) {
+                finalClassification = mostCommon;
+                
+                if (!mostCommon.equals(classification)) {
+                    if (mostCommon.equals("Bullish")) {
+                        finalScore = normalizedBullishScore;
+                    } else if (mostCommon.equals("Bearish")) {
+                        finalScore = normalizedBearishScore;
+                    } else {
+                        finalScore = Math.abs(normalizedBullishScore) > Math.abs(normalizedBearishScore)
+                            ? normalizedBullishScore
+                            : normalizedBearishScore;
+                    }
+                }
+            }
+        }
+        
+        // Update current window result
+        boolean shouldUpdate = 
+            bullishCrossed || bearishCrossed ||
+            classificationHistory.size() < SMOOTHING_CYCLES ||
+            finalClassification.equals(classification);
+        
+        if (shouldUpdate) {
+            currentClassification = finalClassification;
+            currentScore = finalScore;
+            // Store segment scores for current window
+            currentFuturesScore = futuresScore;
+            currentCallsScore = callsScore;
+            currentPutsScore = putsScore;
         }
     }
     
@@ -328,7 +496,6 @@ public class TrendCalculationService {
             return null;
         }
         
-        // Find first contract with valid LTP
         DerivativeContract contract = null;
         for (DerivativeContract c : contracts) {
             if (c != null && c.getLastPrice() != null) {
@@ -341,7 +508,6 @@ public class TrendCalculationService {
             return null;
         }
         
-        // Extract all metrics
         Double ltp = contract.getLastPrice() != null ? contract.getLastPrice().doubleValue() : null;
         Double vol = (double) contract.getVolume();
         Double bid = contract.getBid() != null ? contract.getBid().doubleValue() : null;
@@ -349,7 +515,6 @@ public class TrendCalculationService {
         Double bidQty = contract.getBidQuantity() != null ? contract.getBidQuantity().doubleValue() : null;
         Double askQty = contract.getAskQuantity() != null ? contract.getAskQuantity().doubleValue() : null;
         
-        // All metrics must be valid (matching release validation)
         if (ltp == null || vol == null || bid == null || ask == null || bidQty == null || askQty == null) {
             return null;
         }
@@ -363,7 +528,7 @@ public class TrendCalculationService {
     }
     
     /**
-     * Update cache with new metrics (FIFO).
+     * Update cache with new metrics.
      */
     private void updateCache(Map<String, List<Double>> cache, Metrics metrics) {
         addToCache(cache.get("ltp"), metrics.ltp);
@@ -377,15 +542,11 @@ public class TrendCalculationService {
     private void addToCache(List<Double> cache, Double value) {
         if (value != null && !Double.isNaN(value)) {
             cache.add(value);
-            while (cache.size() > windowSize) {
-                cache.remove(0);
-            }
         }
     }
     
     /**
      * Calculate delta as percent change from current vs average of cache.
-     * Exactly matches release logic.
      */
     private double calculateDelta(double current, List<Double> cache) {
         if (cache == null || cache.isEmpty()) {
@@ -405,7 +566,6 @@ public class TrendCalculationService {
     
     /**
      * Get direction: 1 for up, -1 for down, 0 for flat.
-     * Exactly matches release logic.
      */
     private int getDirection(double delta, double threshold) {
         if (delta > threshold) return 1;
@@ -415,10 +575,8 @@ public class TrendCalculationService {
     
     /**
      * Calculate score for a segment.
-     * Exactly matches release logic.
      */
     private double calculateSegmentScore(Metrics current, Map<String, List<Double>> cache, String segmentType) {
-        // Calculate deltas
         double ltpDelta = calculateDelta(current.ltp, cache.get("ltp"));
         double volDelta = calculateDelta(current.vol, cache.get("vol"));
         double bidDelta = calculateDelta(current.bid, cache.get("bid"));
@@ -426,7 +584,6 @@ public class TrendCalculationService {
         double bidQtyDelta = calculateDelta(current.bidQty, cache.get("bidQty"));
         double askQtyDelta = calculateDelta(current.askQty, cache.get("askQty"));
         
-        // Get directions (threshold 0.1%)
         int ltpDir = getDirection(ltpDelta, 0.1);
         int volDir = getDirection(volDelta, 0.1);
         int bidDir = getDirection(bidDelta, 0.1);
@@ -437,7 +594,6 @@ public class TrendCalculationService {
         double score = 0;
         
         if (segmentType.equals("futures") || segmentType.equals("calls")) {
-            // Bullish: LTP↑, VOL↑, BID↑, BID_QTY↑, ASK_QTY↓
             if (ltpDir == 1) score += WEIGHT_LTP;
             else if (ltpDir == -1) score -= WEIGHT_LTP;
             
@@ -453,14 +609,12 @@ public class TrendCalculationService {
             if (askQtyDir == -1) score += WEIGHT_ASK_QTY;
             else if (askQtyDir == 1) score -= WEIGHT_ASK_QTY;
             
-            // ASK handling: soft factor
             if (askDir == -1) {
                 score += WEIGHT_ASK * 0.5;
             } else if (askDir == 1) {
                 score *= 0.85;
             }
             
-            // Depth ratio boost
             if (current.bidQty > 0 && current.askQty > 0) {
                 double depthRatio = current.bidQty / current.askQty;
                 if (depthRatio > 1.2) {
@@ -471,7 +625,6 @@ public class TrendCalculationService {
             }
             
         } else if (segmentType.equals("puts")) {
-            // For puts, bullish market means puts are down
             if (ltpDir == -1) score += WEIGHT_LTP;
             else if (ltpDir == 1) score -= WEIGHT_LTP;
             
@@ -487,14 +640,12 @@ public class TrendCalculationService {
             if (askQtyDir == 1) score += WEIGHT_ASK_QTY;
             else if (askQtyDir == -1) score -= WEIGHT_ASK_QTY;
             
-            // ASK handling: soft factor (inverse for puts)
             if (askDir == 1) {
                 score += WEIGHT_ASK * 0.5;
             } else if (askDir == -1) {
                 score *= 0.85;
             }
             
-            // Depth ratio boost (inverse for puts)
             if (current.bidQty > 0 && current.askQty > 0) {
                 double depthRatio = current.bidQty / current.askQty;
                 if (depthRatio < 0.8) {
@@ -510,7 +661,6 @@ public class TrendCalculationService {
     
     /**
      * Normalize score to -10 to +10 range.
-     * Exactly matches release logic.
      */
     private double normalizeScore(double score) {
         double maxPossible = 5.0;

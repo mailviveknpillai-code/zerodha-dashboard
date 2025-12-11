@@ -24,16 +24,26 @@ export default function FuturesTable({
   const [volumeTrend, setVolumeTrend] = useState('flat');
   const previousSpotRef = React.useRef(null);
   const previousVolumeRef = React.useRef(null);
+  const previousTrendRef = React.useRef({ classification: 'Neutral', score: 0 });
   const { isDarkMode } = useTheme();
   
-  // Read trend from backend (calculated from API polled values with FIFO window)
-  // Trend is updated in UI at frontend refresh rate, but calculation is based on API polling
-  const marketTrend = derivativesData?.trendClassification && derivativesData?.trendScore != null
+  // Read trend from backend (calculated from API polled values with discrete window intervals)
+  // Trend is updated in UI at frontend refresh rate, but calculation happens at window boundaries
+  // IMPORTANT: Preserve previous value if current is null/undefined to prevent reset to 0 during refresh
+  const currentTrend = derivativesData?.trendClassification && derivativesData?.trendScore != null
     ? {
         classification: derivativesData.trendClassification,
         score: Number(derivativesData.trendScore)
       }
-    : { classification: 'Neutral', score: 0 };
+    : null;
+  
+  // Update ref when we have a valid value (including 0, as 0 is a valid score)
+  if (currentTrend !== null) {
+    previousTrendRef.current = currentTrend;
+  }
+  
+  // Use current trend if available, otherwise preserve previous (prevents reset to 0 during refresh)
+  const marketTrend = currentTrend || previousTrendRef.current;
   
   // Read spot LTP trend from backend (average movement over configured window)
   const spotLtpTrend = {

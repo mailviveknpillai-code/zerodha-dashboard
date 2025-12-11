@@ -22,6 +22,7 @@ import { useRef, useEffect, useState, useCallback } from 'react';
 export function useDirectionFlow(currentValue, minChangePercent = 0.1) {
   const [direction, setDirection] = useState('NEUTRAL');
   const [confidence, setConfidence] = useState(0);
+  const [intensity, setIntensity] = useState('SLOW');
   const [highs, setHighs] = useState([]);
   const [lows, setLows] = useState([]);
   
@@ -35,6 +36,9 @@ export function useDirectionFlow(currentValue, minChangePercent = 0.1) {
   // Track direction confirmation
   const directionHistoryRef = useRef([]);
   
+  // Track recent price change percentage for intensity calculation
+  const recentChangePercentRef = useRef(0);
+  
   useEffect(() => {
     // Skip if no valid value
     if (currentValue === null || currentValue === undefined) {
@@ -42,8 +46,10 @@ export function useDirectionFlow(currentValue, minChangePercent = 0.1) {
       if (previousValueRef.current !== null) {
         previousValueRef.current = null;
         movementCacheRef.current = [];
+        recentChangePercentRef.current = 0;
         setDirection('NEUTRAL');
         setConfidence(0);
+        setIntensity('SLOW');
       }
       return;
     }
@@ -61,6 +67,7 @@ export function useDirectionFlow(currentValue, minChangePercent = 0.1) {
       // Set initial state
       setDirection('NEUTRAL');
       setConfidence(0);
+      setIntensity('SLOW');
       return;
     }
     
@@ -74,6 +81,9 @@ export function useDirectionFlow(currentValue, minChangePercent = 0.1) {
     const changePercent = previousValueRef.current !== 0 
       ? Math.abs((change / previousValueRef.current) * 100)
       : 0;
+    
+    // Store recent change percentage for intensity calculation
+    recentChangePercentRef.current = changePercent;
     
     // Determine movement direction (UP, DOWN, or FLAT)
     let movement = 'FLAT';
@@ -99,15 +109,22 @@ export function useDirectionFlow(currentValue, minChangePercent = 0.1) {
     // Show immediate direction if we only have 1 movement
     if (movements.length === 1) {
       const lastMovement = movements[0];
+      const calculatedConfidence = Math.min(100, Math.max(1, changePercent * 2)); // Ensure at least 1% if movement detected
+      const isHighMovement = calculatedConfidence >= 50 || changePercent >= 0.5;
+      const calculatedIntensity = isHighMovement ? 'HIGH' : 'SLOW';
+      
       if (lastMovement === 'UP') {
         setDirection('UP');
-        setConfidence(Math.min(100, Math.max(1, changePercent * 2))); // Ensure at least 1% if movement detected
+        setConfidence(calculatedConfidence);
+        setIntensity(calculatedIntensity);
       } else if (lastMovement === 'DOWN') {
         setDirection('DOWN');
-        setConfidence(Math.min(100, Math.max(1, changePercent * 2))); // Ensure at least 1% if movement detected
+        setConfidence(calculatedConfidence);
+        setIntensity(calculatedIntensity);
       } else {
         setDirection('NEUTRAL');
         setConfidence(0);
+        setIntensity('SLOW');
       }
       return;
     }
@@ -212,12 +229,17 @@ export function useDirectionFlow(currentValue, minChangePercent = 0.1) {
         newConfidence = 0;
       }
       
+      // Calculate intensity: HIGH if confidence >= 50% OR recent change >= 0.5%
+      const isHighMovement = newConfidence >= 50 || recentChangePercentRef.current >= 0.5;
+      const newIntensity = isHighMovement ? 'HIGH' : 'SLOW';
+      
       // Update direction immediately when pattern is detected
       // Only smooth if we're switching between UP and DOWN (not from/to NEUTRAL)
       if (direction === 'NEUTRAL' || newDirection === 'NEUTRAL') {
         // Immediate update when coming from or going to neutral
         setDirection(newDirection);
         setConfidence(newConfidence);
+        setIntensity(newIntensity);
       } else if (direction !== newDirection) {
         // Switching between UP and DOWN - use smoothing
         directionHistoryRef.current.push(newDirection);
@@ -231,31 +253,37 @@ export function useDirectionFlow(currentValue, minChangePercent = 0.1) {
           if (lastTwo[0] === lastTwo[1]) {
             setDirection(newDirection);
             setConfidence(newConfidence);
+            setIntensity(newIntensity);
           }
         } else {
           // Not enough history yet, use current
           setDirection(newDirection);
           setConfidence(newConfidence);
+          setIntensity(newIntensity);
         }
       } else {
         // Same direction - update immediately
         setDirection(newDirection);
         setConfidence(newConfidence);
+        setIntensity(newIntensity);
       }
     } else {
       // Not enough movements yet - cannot determine direction
       setDirection('NEUTRAL');
       setConfidence(0);
+      setIntensity('SLOW');
     }
-  }, [currentValue, minChangePercent]);
+  }, [currentValue, minChangePercent, direction]);
   
   // Reset function to clear history
   const reset = useCallback(() => {
     previousValueRef.current = null;
     movementCacheRef.current = [];
     directionHistoryRef.current = [];
+    recentChangePercentRef.current = 0;
     setDirection('NEUTRAL');
     setConfidence(0);
+    setIntensity('SLOW');
     setHighs([]);
     setLows([]);
   }, []);
@@ -263,6 +291,7 @@ export function useDirectionFlow(currentValue, minChangePercent = 0.1) {
   return {
     direction,
     confidence,
+    intensity, // 'HIGH' or 'SLOW'
     highs: highs.slice(-5), // Return last 5 highs
     lows: lows.slice(-5),   // Return last 5 lows
     reset

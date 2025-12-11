@@ -6,20 +6,37 @@ export default function CollapsibleRightPanel({ derivativesData }) {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const { isDarkMode } = useTheme();
   const { intervalSeconds: spotLtpInterval } = useSpotLtpInterval();
+  const previousTrendRef = React.useRef({ classification: 'Neutral', score: 0 });
   
-  // Read trend from backend (calculated from API polled values with FIFO window)
-  // Trend is updated in UI at frontend refresh rate, but calculation is based on API polling
-  const marketTrend = derivativesData?.trendClassification && derivativesData?.trendScore != null
+  // Read trend from backend (calculated from API polled values with discrete window intervals)
+  // Trend is updated in UI at frontend refresh rate, but calculation happens at window boundaries
+  // IMPORTANT: Preserve previous value if current is null/undefined to prevent reset to 0 during refresh
+  const currentTrend = derivativesData?.trendClassification && derivativesData?.trendScore != null
     ? {
         classification: derivativesData.trendClassification,
         score: Number(derivativesData.trendScore)
       }
-    : { classification: 'Neutral', score: 0 };
+    : null;
+  
+  // Update ref when we have a valid value (including 0, as 0 is a valid score)
+  if (currentTrend !== null) {
+    previousTrendRef.current = currentTrend;
+  }
+  
+  // Use current trend if available, otherwise preserve previous (prevents reset to 0 during refresh)
+  const marketTrend = currentTrend || previousTrendRef.current;
   
   // Read spot LTP trend from backend (average movement over configured window)
   const spotLtpTrend = {
     direction: derivativesData?.spotLtpTrendDirection || 'FLAT',
     percent: derivativesData?.spotLtpTrendPercent ?? 0
+  };
+
+  // Read segment trend scores from backend (futures, calls, puts)
+  const segmentScores = {
+    futures: derivativesData?.futuresTrendScore != null ? Number(derivativesData.futuresTrendScore) : null,
+    calls: derivativesData?.callsTrendScore != null ? Number(derivativesData.callsTrendScore) : null,
+    puts: derivativesData?.putsTrendScore != null ? Number(derivativesData.putsTrendScore) : null
   };
 
   const containerClasses = [
@@ -114,13 +131,77 @@ export default function CollapsibleRightPanel({ derivativesData }) {
             </div>
           </div>
 
+          {/* Segment Trend Scores */}
+          <div className={`rounded-lg border p-4 ${isDarkMode ? 'bg-slate-700/30 border-slate-600' : 'bg-gray-50 border-gray-200'}`}>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-sm font-medium">Segment Scores</span>
+              <span className="text-xs opacity-75">Raw scores</span>
+            </div>
+            <div className="space-y-2">
+              {/* Futures Score */}
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium opacity-75">Futures:</span>
+                <span className={`text-sm font-semibold ${
+                  segmentScores.futures != null
+                    ? segmentScores.futures > 0
+                      ? isDarkMode ? 'text-green-400' : 'text-green-600'
+                      : segmentScores.futures < 0
+                      ? isDarkMode ? 'text-red-400' : 'text-red-600'
+                      : isDarkMode ? 'text-slate-400' : 'text-gray-600'
+                    : isDarkMode ? 'text-slate-500' : 'text-gray-400'
+                }`}>
+                  {segmentScores.futures != null
+                    ? (segmentScores.futures > 0 ? '+' : '') + segmentScores.futures.toFixed(2)
+                    : '—'}
+                </span>
+              </div>
+              {/* Calls Score */}
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium opacity-75">Calls:</span>
+                <span className={`text-sm font-semibold ${
+                  segmentScores.calls != null
+                    ? segmentScores.calls > 0
+                      ? isDarkMode ? 'text-green-400' : 'text-green-600'
+                      : segmentScores.calls < 0
+                      ? isDarkMode ? 'text-red-400' : 'text-red-600'
+                      : isDarkMode ? 'text-slate-400' : 'text-gray-600'
+                    : isDarkMode ? 'text-slate-500' : 'text-gray-400'
+                }`}>
+                  {segmentScores.calls != null
+                    ? (segmentScores.calls > 0 ? '+' : '') + segmentScores.calls.toFixed(2)
+                    : '—'}
+                </span>
+              </div>
+              {/* Puts Score */}
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium opacity-75">Puts:</span>
+                <span className={`text-sm font-semibold ${
+                  segmentScores.puts != null
+                    ? segmentScores.puts > 0
+                      ? isDarkMode ? 'text-green-400' : 'text-green-600'
+                      : segmentScores.puts < 0
+                      ? isDarkMode ? 'text-red-400' : 'text-red-600'
+                      : isDarkMode ? 'text-slate-400' : 'text-gray-600'
+                    : isDarkMode ? 'text-slate-500' : 'text-gray-400'
+                }`}>
+                  {segmentScores.puts != null
+                    ? (segmentScores.puts > 0 ? '+' : '') + segmentScores.puts.toFixed(2)
+                    : '—'}
+                </span>
+              </div>
+            </div>
+          </div>
+
           <div className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-gray-500'} border-t ${sectionDivider} pt-4`}>
             <p className="mb-2 font-medium">Trend Indicators</p>
             <p className="text-[10px] leading-relaxed mb-2">
-              <strong>Market Trend:</strong> Based on futures, calls, and puts data with FIFO window.
+              <strong>Market Trend:</strong> Based on futures, calls, and puts data with discrete window intervals.
+            </p>
+            <p className="text-[10px] leading-relaxed mb-2">
+              <strong>Segment Scores:</strong> Raw trend scores for each segment (futures, calls, puts) before normalization and weighting.
             </p>
             <p className="text-[10px] leading-relaxed">
-              <strong>Spot LTP Trend:</strong> Average movement of futures LTP over the last {spotLtpInterval} seconds.
+              <strong>Spot LTP Trend:</strong> Average movement of spot LTP over the last {spotLtpInterval} seconds.
             </p>
           </div>
         </div>

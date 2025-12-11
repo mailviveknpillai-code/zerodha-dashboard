@@ -6,10 +6,11 @@ import { ContractColorProvider, useContractColoringContext } from '../contexts/C
 import { useRefreshInterval } from '../contexts/RefreshIntervalContext';
 import { useVolumeWindow } from '../contexts/VolumeWindowContext';
 import useLatestDerivativesFeed from '../hooks/useLatestDerivativesFeed';
-import { fetchDerivatives } from '../api/client';
+import { fetchDerivatives, getApiPollingStatus } from '../api/client';
 import { useTheme } from '../contexts/ThemeContext';
 import logger from '../utils/logger';
 import { useIncrementalVolumeMap } from '../hooks/useIncrementalVolume';
+import useEatenValuesCache from '../hooks/useEatenValuesCache';
 
 function DerivativesDashboard({ 
   selectedContract,
@@ -26,11 +27,16 @@ function DerivativesDashboard({
   const [isStrikeLocked, setIsStrikeLocked] = useState(false); // Track if strike is manually locked
   const [lockedStrikeValue, setLockedStrikeValue] = useState(null); // Store the actual strike value when locked
   const [dynamicTableCollapsed, setDynamicTableCollapsed] = useState(false);
+  const [pollingWarning, setPollingWarning] = useState(null);
   const navigate = useNavigate();
   const initialFetchDoneRef = useRef(false);
   
   // Track incremental volume changes over configurable rolling windows
   const { updateVolume: updateIncrementalVolume } = useIncrementalVolumeMap(volumeWindowMs);
+  
+  // Cache eaten values independently of UI refresh rate
+  // This ensures bubbles don't reset to 0 on every refresh
+  const { updateEatenValues, getEatenValues } = useEatenValuesCache();
   
   // Do one initial full fetch to populate cache (runs in background)
   useEffect(() => {
@@ -46,6 +52,51 @@ function DerivativesDashboard({
           console.error('Initial fetch failed (will retry via polling):', err);
         });
     }
+  }, []);
+
+  // Lightweight polling of backend API polling status for a subtle warning banner
+  useEffect(() => {
+    let cancelled = false;
+
+    const checkStatus = async () => {
+      try {
+        const status = await getApiPollingStatus();
+        if (cancelled || !status) return;
+
+        const failures = typeof status.consecutiveFailures === 'number'
+          ? status.consecutiveFailures
+          : 0;
+
+        let message = null;
+        if (failures >= 3 || status.hasWarning) {
+          const rawError = (status.lastError || '').toString();
+          const errLower = rawError.toLowerCase();
+          const isRateLimit =
+            errLower.includes('rate limit') ||
+            errLower.includes('429') ||
+            errLower.includes('too many requests');
+
+          if (isRateLimit) {
+            message = 'Backend API polling is unstable (likely rate limited). Please increase the API polling interval in Settings to reduce load.';
+          } else {
+            message = `Backend API polling is unstable (${failures} recent failures). Data may update less frequently until the connection recovers.`;
+          }
+        }
+
+        setPollingWarning(message);
+      } catch (e) {
+        // Do not spam logs or override UI if status endpoint fails occasionally
+      }
+    };
+
+    // Initial check and interval
+    checkStatus();
+    const id = setInterval(checkStatus, 5000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
   }, []);
   
   // Use /latest endpoint for high-frequency polling (cached, fast)
@@ -322,6 +373,28 @@ function DerivativesDashboard({
       const rawAsk = option?.ask != null ? Number(option.ask) : null;
       const rawBidQty = option?.bidQuantity != null ? Number(option.bidQuantity) : null;
       const rawAskQty = option?.askQuantity != null ? Number(option.askQuantity) : null;
+      // Handle eatenDelta, bidEaten, askEaten: Get from backend, but preserve via cache
+      // The cache ensures values don't reset to 0 on every UI refresh
+      const instrumentToken = option?.instrumentToken ? String(option.instrumentToken) : null;
+      const backendEatenDelta = option?.eatenDelta != null && option?.eatenDelta !== undefined 
+        ? Number(option.eatenDelta) 
+        : null;
+      const backendBidEaten = option?.bidEaten != null && option?.bidEaten !== undefined 
+        ? Number(option.bidEaten) 
+        : null;
+      const backendAskEaten = option?.askEaten != null && option?.askEaten !== undefined 
+        ? Number(option.askEaten) 
+        : null;
+      
+      // Update cache with backend values (cache preserves non-zero values, only updates on change)
+      const cachedValues = instrumentToken 
+        ? updateEatenValues(instrumentToken, backendEatenDelta, backendBidEaten, backendAskEaten)
+        : { eatenDelta: backendEatenDelta, bidEaten: backendBidEaten, askEaten: backendAskEaten };
+      
+      // Use cached values (preserved across refreshes)
+      const rawEatenDelta = cachedValues.eatenDelta;
+      const rawBidEaten = cachedValues.bidEaten;
+      const rawAskEaten = cachedValues.askEaten;
  
       let segmentLabel;
       let badgeLabel = baseBadgeLabel;
@@ -392,6 +465,13 @@ function DerivativesDashboard({
         bidQtyRaw: rawBidQty,
         askQty: rawAskQty != null ? formatInteger(rawAskQty) : '',
         askQtyRaw: rawAskQty,
+        eatenDeltaRaw: rawEatenDelta,
+        eatenDelta: rawEatenDelta != null ? formatInteger(Math.abs(rawEatenDelta)) : '',
+        bidEatenRaw: rawBidEaten,
+        askEatenRaw: rawAskEaten,
+        ltpMovementDirection: option?.ltpMovementDirection || null,
+        ltpMovementConfidence: option?.ltpMovementConfidence != null ? Number(option.ltpMovementConfidence) : null,
+        ltpMovementIntensity: option?.ltpMovementIntensity || null,
         strikePrice: option?.strikePrice,
         sectionType,
         contractKey,
@@ -424,6 +504,10 @@ function DerivativesDashboard({
       bidQtyRaw: null,
       askQty: '',
       askQtyRaw: null,
+      eatenDeltaRaw: null,
+      eatenDelta: '',
+      bidEatenRaw: null,
+      askEatenRaw: null,
       sectionType,
       isInfoRow: true,
     });
@@ -451,6 +535,10 @@ function DerivativesDashboard({
       bidQtyRaw: null,
       askQty: '',
       askQtyRaw: null,
+      eatenDeltaRaw: null,
+      eatenDelta: '',
+      bidEatenRaw: null,
+      askEatenRaw: null,
       sectionType
     });
 
@@ -466,6 +554,28 @@ function DerivativesDashboard({
       const rawAsk = future?.ask != null ? Number(future.ask) : null;
       const rawBidQty = future?.bidQuantity != null ? Number(future.bidQuantity) : null;
       const rawAskQty = future?.askQuantity != null ? Number(future.askQuantity) : null;
+      // Handle eatenDelta, bidEaten, askEaten: Get from backend, but preserve via cache
+      // The cache ensures values don't reset to 0 on every UI refresh
+      const instrumentToken = future?.instrumentToken ? String(future.instrumentToken) : null;
+      const backendEatenDelta = future?.eatenDelta != null && future?.eatenDelta !== undefined 
+        ? Number(future.eatenDelta) 
+        : null;
+      const backendBidEaten = future?.bidEaten != null && future?.bidEaten !== undefined 
+        ? Number(future.bidEaten) 
+        : null;
+      const backendAskEaten = future?.askEaten != null && future?.askEaten !== undefined 
+        ? Number(future.askEaten) 
+        : null;
+      
+      // Update cache with backend values (cache preserves non-zero values, only updates on change)
+      const cachedValues = instrumentToken 
+        ? updateEatenValues(instrumentToken, backendEatenDelta, backendBidEaten, backendAskEaten)
+        : { eatenDelta: backendEatenDelta, bidEaten: backendBidEaten, askEaten: backendAskEaten };
+      
+      // Use cached values (preserved across refreshes)
+      const rawEatenDelta = cachedValues.eatenDelta;
+      const rawBidEaten = cachedValues.bidEaten;
+      const rawAskEaten = cachedValues.askEaten;
 
       // Calculate incremental volume (cumulative change over 5-minute window)
       const incrementalVolData = contractKey && rawVol !== null 
@@ -502,6 +612,13 @@ function DerivativesDashboard({
         bidQtyRaw: rawBidQty,
         askQty: rawAskQty != null ? formatInteger(rawAskQty) : '',
         askQtyRaw: rawAskQty,
+        eatenDeltaRaw: rawEatenDelta,
+        eatenDelta: rawEatenDelta != null ? formatInteger(Math.abs(rawEatenDelta)) : '',
+        bidEatenRaw: rawBidEaten,
+        askEatenRaw: rawAskEaten,
+        ltpMovementDirection: future?.ltpMovementDirection || null,
+        ltpMovementConfidence: future?.ltpMovementConfidence != null ? Number(future.ltpMovementConfidence) : null,
+        ltpMovementIntensity: future?.ltpMovementIntensity || null,
         sectionType: 'futures',
         instrumentToken: future.instrumentToken,
         tradingsymbol: future.tradingsymbol,
@@ -751,6 +868,28 @@ function DerivativesDashboard({
       const rawAsk = option?.ask != null ? Number(option.ask) : null;
       const rawBidQty = option?.bidQuantity != null ? Number(option.bidQuantity) : null;
       const rawAskQty = option?.askQuantity != null ? Number(option.askQuantity) : null;
+      // Handle eatenDelta: Get from backend, but preserve via cache
+      // The cache ensures values don't reset to 0 on every UI refresh
+      const instrumentToken = option?.instrumentToken ? String(option.instrumentToken) : null;
+      const backendEatenDelta = option?.eatenDelta != null && option?.eatenDelta !== undefined 
+        ? Number(option.eatenDelta) 
+        : null;
+      const backendBidEaten = option?.bidEaten != null && option?.bidEaten !== undefined 
+        ? Number(option.bidEaten) 
+        : null;
+      const backendAskEaten = option?.askEaten != null && option?.askEaten !== undefined 
+        ? Number(option.askEaten) 
+        : null;
+      
+      // Update cache with backend values (cache preserves non-zero values, only updates on change)
+      const cachedValues = instrumentToken 
+        ? updateEatenValues(instrumentToken, backendEatenDelta, backendBidEaten, backendAskEaten)
+        : { eatenDelta: backendEatenDelta, bidEaten: backendBidEaten, askEaten: backendAskEaten };
+      
+      // Use cached values (preserved across refreshes)
+      const rawEatenDelta = cachedValues.eatenDelta;
+      const rawBidEaten = cachedValues.bidEaten;
+      const rawAskEaten = cachedValues.askEaten;
 
       // Calculate incremental volume (cumulative change over 5-minute window)
       const contractKey = option?.instrumentToken || option?.tradingsymbol || null;
@@ -790,6 +929,10 @@ function DerivativesDashboard({
         bidQtyRaw: rawBidQty,
         askQty: rawAskQty != null ? formatIntegerValue(rawAskQty) : '',
         askQtyRaw: rawAskQty,
+        eatenDeltaRaw: rawEatenDelta,
+        eatenDelta: rawEatenDelta != null ? formatIntegerValue(Math.abs(rawEatenDelta)) : '',
+        bidEatenRaw: rawBidEaten,
+        askEatenRaw: rawAskEaten,
         highs: {},
         lows: {},
       };
@@ -820,6 +963,10 @@ function DerivativesDashboard({
         bidQtyRaw: null,
         askQty: '',
         askQtyRaw: null,
+        eatenDeltaRaw: null,
+        eatenDelta: '',
+        bidEatenRaw: null,
+        askEatenRaw: null,
         highs: {},
         lows: {},
       });
@@ -884,6 +1031,10 @@ function DerivativesDashboard({
         bidQtyRaw: null,
         askQty: '',
         askQtyRaw: null,
+        eatenDeltaRaw: null,
+        eatenDelta: '',
+        bidEatenRaw: null,
+        askEatenRaw: null,
         highs: {},
         lows: {},
       });
@@ -983,6 +1134,19 @@ function DerivativesDashboard({
   return (
     <ContractColorProvider maxSize={colorCacheSize}>
       <div className="space-y-6">
+        {/* Subtle backend polling warning (non-blocking, non-intrusive) */}
+        {pollingWarning && (
+          <div
+            className={`text-xs px-3 py-2 rounded border ${
+              isDarkMode
+                ? 'bg-amber-900/40 border-amber-700 text-amber-200'
+                : 'bg-amber-50 border-amber-200 text-amber-800'
+            }`}
+          >
+            {pollingWarning}
+          </div>
+        )}
+
         {/* Data Source Indicator */}
         {(derivativesData.dataSource || targetExpiry) && (
           <div className="relative flex justify-center">

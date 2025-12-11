@@ -1,6 +1,9 @@
 import React from 'react';
 import DataCell from './common/DataCell';
 import LTPCell from './common/LTPCell';
+import DeltaBACell from './common/DeltaBACell';
+import BidQtyCell from './common/BidQtyCell';
+import AskQtyCell from './common/AskQtyCell';
 import { useTheme } from '../contexts/ThemeContext';
 import { useContractColoringContext } from '../contexts/ContractColorContext';
 
@@ -108,7 +111,7 @@ export default function OptionsTable({
               <col style={{ width: '8%' }} />
               <col style={{ width: '8%' }} />
               <col style={{ width: '8%' }} />
-              <col style={{ width: '7%' }} />
+              <col style={{ width: '8%' }} />
               <col style={{ width: '8%' }} />
               <col style={{ width: '8%' }} />
             </colgroup>
@@ -122,7 +125,12 @@ export default function OptionsTable({
                 <th className="px-3 sm:px-4 py-3 text-right">Bid</th>
                 <th className="px-3 sm:px-4 py-3 text-right">Ask</th>
                 <th className="px-3 sm:px-4 py-3 text-right">Bid Qty</th>
-                <th className="px-3 sm:px-4 py-3 text-right">ΔB/A QTY</th>
+                <th 
+                  className="px-3 sm:px-4 py-3 text-right" 
+                  title="Bid Qty - Ask Qty. Bubble shows Eaten Δ (Ask Eaten - Bid Eaten over rolling window)"
+                >
+                  ΔB/A QTY
+                </th>
                 <th className="px-3 sm:px-4 py-3 text-right">Ask Qty</th>
                 <th className="px-3 sm:px-4 py-3 text-right">Δ Price</th>
               </tr>
@@ -246,6 +254,9 @@ export default function OptionsTable({
                     ) : (
                       <LTPCell
                         value={row.ltpRaw}
+                        ltpMovementDirection={row.ltpMovementDirection}
+                        ltpMovementConfidence={row.ltpMovementConfidence}
+                        ltpMovementIntensity={row.ltpMovementIntensity}
                         className={`${numericCellBase} ${isStaticRow ? '' : 'font-semibold'}`}
                         displayValue={row.ltp}
                         coloringMeta={makeColorMeta('ltp')}
@@ -300,14 +311,18 @@ export default function OptionsTable({
                       displayValue={row.ask}
                       coloringMeta={makeColorMeta('ask')}
                     />
-                    <DataCell
-                      value={isStaticRow ? null : row.bidQtyRaw}
+                    <BidQtyCell
+                      bidQtyValue={isStaticRow ? null : (row.bidQtyRaw ?? null)}
+                      bidQtyDisplay={row.bidQty}
+                      bidEatenValue={isStaticRow ? null : (row.bidEatenRaw ?? null)}
                       className={`${numericCellBase} ${isStaticRow ? '' : 'font-semibold'}`}
-                      displayValue={row.bidQty}
                       coloringMeta={makeColorMeta('bidQty')}
+                      title="Bid Quantity (updates at UI refresh rate). Bubble shows Bid Eaten (uses eaten delta window interval)"
                     />
                     {(() => {
                       // Calculate ΔB/A QTY = bidQty - askQty
+                      // NOTE: This value updates at the normal refresh rate (from API polling)
+                      // The eaten delta window interval ONLY affects the bubble (eatenDeltaRaw)
                       const bidQty = isStaticRow ? null : (row.bidQtyRaw ?? null);
                       const askQty = isStaticRow ? null : (row.askQtyRaw ?? null);
                       const deltaBA = bidQty !== null && askQty !== null && Number.isFinite(bidQty) && Number.isFinite(askQty)
@@ -319,19 +334,23 @@ export default function OptionsTable({
                         : '';
                       
                       return (
-                        <DataCell
-                          value={isStaticRow ? null : deltaBA}
+                        <DeltaBACell
+                          deltaBAValue={isStaticRow ? null : deltaBA}
+                          deltaBADisplay={deltaBADisplay}
+                          eatenDeltaValue={isStaticRow ? null : (row.eatenDeltaRaw ?? null)}
                           className={`${numericCellBase} ${isStaticRow ? '' : 'font-semibold'}`}
-                          displayValue={deltaBADisplay}
                           coloringMeta={makeColorMeta('deltaBA')}
+                          title="ΔB/A QTY = Bid Qty - Ask Qty (updates at UI refresh rate). Bubble shows Eaten Δ (uses eaten delta window interval)"
                         />
                       );
                     })()}
-                    <DataCell
-                      value={isStaticRow ? null : row.askQtyRaw}
+                    <AskQtyCell
+                      askQtyValue={isStaticRow ? null : (row.askQtyRaw ?? null)}
+                      askQtyDisplay={row.askQty}
+                      askEatenValue={isStaticRow ? null : (row.askEatenRaw ?? null)}
                       className={`${numericCellBase} ${isStaticRow ? '' : 'font-semibold'}`}
-                      displayValue={row.askQty}
                       coloringMeta={makeColorMeta('askQty')}
+                      title="Ask Quantity (updates at UI refresh rate). Bubble shows Ask Eaten (uses eaten delta window interval)"
                     />
                     <DataCell
                       value={isStaticRow ? null : row.changeRaw}

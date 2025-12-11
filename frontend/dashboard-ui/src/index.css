@@ -699,6 +699,19 @@ th, td {
   text-align: center !important;
 }
 
+/* DeltaBA cell in fullscreen - center content */
+.fullscreen-table td .flex.flex-col.items-end {
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.fullscreen-table td .flex.flex-col.items-end > div:last-child {
+  font-size: 0.9rem !important;
+  font-weight: 700 !important;
+  text-align: center !important;
+  justify-content: center !important;
+}
+
 /* Segment column - smaller font size to save space */
 .fullscreen-table td:first-child,
 .fullscreen-table th:first-child {

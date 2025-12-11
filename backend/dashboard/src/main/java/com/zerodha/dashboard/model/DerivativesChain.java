@@ -20,6 +20,9 @@ public class DerivativesChain {
     private String dataSource; // BREEZE_API, ZERODHA_KITE, NO_DATA
     private String trendClassification; // Bullish, Bearish, Neutral (calculated in backend from API polled values)
     private Double trendScore; // Normalized score from -10 to +10
+    private Double futuresTrendScore; // Trend score for futures segment (raw score before normalization)
+    private Double callsTrendScore; // Trend score for calls segment (raw score before normalization)
+    private Double putsTrendScore; // Trend score for puts segment (raw score before normalization)
     private Double spotLtpTrendPercent; // Percent change of spot LTP over configured window
     private String spotLtpTrendDirection; // UP, DOWN, FLAT
 
@@ -66,6 +69,15 @@ public class DerivativesChain {
 
     public Double getTrendScore() { return trendScore; }
     public void setTrendScore(Double trendScore) { this.trendScore = trendScore; }
+
+    public Double getFuturesTrendScore() { return futuresTrendScore; }
+    public void setFuturesTrendScore(Double futuresTrendScore) { this.futuresTrendScore = futuresTrendScore; }
+
+    public Double getCallsTrendScore() { return callsTrendScore; }
+    public void setCallsTrendScore(Double callsTrendScore) { this.callsTrendScore = callsTrendScore; }
+
+    public Double getPutsTrendScore() { return putsTrendScore; }
+    public void setPutsTrendScore(Double putsTrendScore) { this.putsTrendScore = putsTrendScore; }
 
     public Double getSpotLtpTrendPercent() { return spotLtpTrendPercent; }
     public void setSpotLtpTrendPercent(Double spotLtpTrendPercent) { this.spotLtpTrendPercent = spotLtpTrendPercent; }

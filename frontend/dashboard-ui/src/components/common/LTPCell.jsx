@@ -6,8 +6,10 @@ import { useDirectionFlow } from '../../hooks/useDirectionFlow';
 /**
  * LTP Cell Component
  * Displays:
- * - Top: Direction flow indicator (arrow + percentage) from HH/HL/LL/LH analysis
+ * - Top: LTP Movement bubble (oval, with arrow indicator and percentage) from frontend calculation
  * - Bottom: LTP value (with more space)
+ * 
+ * The movement calculation is done in the frontend using useDirectionFlow hook.
  */
 const LTPCell = ({
   value,
@@ -15,6 +17,10 @@ const LTPCell = ({
   displayValue,
   coloringMeta = null,
   title = null,
+  // Legacy props from backend - kept for backward compatibility, but not used in logic
+  ltpMovementDirection = null,
+  ltpMovementConfidence = null,
+  ltpMovementIntensity = null,
 }) => {
   const { isDarkMode } = useTheme();
   const { backgroundClass, haloClass } = useContractColoring(coloringMeta, value);
@@ -29,32 +35,32 @@ const LTPCell = ({
     .filter(Boolean)
     .join(' ');
 
-  // Check if we have a valid numeric value for direction flow
-  // Handle both raw numbers and formatted strings
-  let numericValue = null;
-  if (value !== null && value !== undefined) {
-    const num = Number(value);
-    if (!isNaN(num) && isFinite(num) && num > 0) {
-      numericValue = num;
-    } else if (displayValue) {
-      // Fallback: try to parse displayValue if value is not numeric
-      // Remove all non-numeric characters except decimal point and minus
-      const cleaned = displayValue.toString().replace(/[^\d.-]/g, '');
-      const parsed = Number(cleaned);
-      if (!isNaN(parsed) && isFinite(parsed) && parsed > 0) {
-        numericValue = parsed;
-      }
-    }
-  }
-
-  // Get direction flow data - use very low threshold (0.01%) for sensitive detection
-  // This ensures even small price movements are detected
-  const { direction, confidence } = useDirectionFlow(numericValue, 0.01);
+  // Calculate movement using frontend hook based on current LTP value
+  const numericValue = value !== null && value !== undefined ? Number(value) : null;
+  const { direction, confidence, intensity } = useDirectionFlow(numericValue, 0.01);
   const confidenceInt = Math.round(confidence);
 
-  // No color coding - use neutral text color
-  const indicatorColor = isDarkMode ? 'text-slate-300' : 'text-gray-600';
-  const arrowSymbol = direction === 'UP' ? '↑' : direction === 'DOWN' ? '↓' : '→';
+  // Determine arrow symbol based on direction and intensity
+  // Single arrow for slow movement, double arrow for high movement
+  let arrowSymbol = '→'; // Default: neutral
+  if (direction === 'UP') {
+    arrowSymbol = intensity === 'HIGH' ? '↑↑' : '↑';
+  } else if (direction === 'DOWN') {
+    arrowSymbol = intensity === 'HIGH' ? '↓↓' : '↓';
+  }
+
+  // Bubble colors - similar to eaten delta bubble
+  const bubbleBgColor = direction === 'NEUTRAL'
+    ? isDarkMode ? 'bg-slate-700/50' : 'bg-gray-100'
+    : direction === 'UP'
+    ? isDarkMode ? 'bg-green-500/20' : 'bg-green-100'
+    : isDarkMode ? 'bg-red-500/20' : 'bg-red-100';
+
+  const bubbleTextColor = direction === 'NEUTRAL'
+    ? isDarkMode ? 'text-slate-400' : 'text-gray-600'
+    : direction === 'UP'
+    ? isDarkMode ? 'text-green-400' : 'text-green-700'
+    : isDarkMode ? 'text-red-400' : 'text-red-700';
 
   // Extract text size classes from className prop to apply to LTP value
   const hasTextXs = className.includes('text-xs');
@@ -68,21 +74,49 @@ const LTPCell = ({
                       hasTextSm ? 'text-sm' : 
                       'text-xs sm:text-sm';
 
+  // Always show bubble - even if direction is NEUTRAL or data is not yet strong
+  const shouldShowBubble = direction !== null || ltpMovementDirection !== null;
+
   return (
     <td className={composedClassName} title={title || undefined}>
-      <div className="ltp-cell-container flex flex-col items-end justify-start h-full py-1.5 min-h-[3.5rem]">
-        {/* Top: Direction Flow Indicator (Arrow + Percentage) - Always show if we have a value */}
-        {numericValue !== null && (
-          <div className={`ltp-indicator flex items-center justify-end gap-1 text-[11px] leading-none ${indicatorColor} mb-1.5 flex-shrink-0 h-4`}>
-            <span className="font-bold text-sm leading-none">{arrowSymbol}</span>
-            {confidenceInt > 0 && (
-              <span className="opacity-90 font-semibold text-[10px] leading-none">{confidenceInt}%</span>
-            )}
+      <div className="flex flex-col items-end justify-center h-full py-1.5 min-h-[3.5rem]">
+        {/* Top: LTP Movement Bubble (oval, similar to eaten delta) - Always show */}
+        {shouldShowBubble ? (
+          <div
+            className={`flex items-center justify-center rounded-full px-2 py-0.5 mb-1.5 flex-shrink-0 ${bubbleBgColor} ${bubbleTextColor}`}
+            style={{
+              minWidth: '2.5rem',
+              height: '1.5rem',
+              borderRadius: '9999px', // Oval shape
+            }}
+          >
+            <span className="text-xs font-bold leading-none flex items-center gap-0.5">
+              <span>{arrowSymbol}</span>
+              {confidenceInt > 0 ? (
+                <span className="opacity-90">{confidenceInt}%</span>
+              ) : direction === 'NEUTRAL' ? (
+                <span className="opacity-70">—</span>
+              ) : null}
+            </span>
+          </div>
+        ) : (
+          // Placeholder bubble when data not available
+          <div
+            className={`flex items-center justify-center rounded-full px-2 py-0.5 mb-1.5 flex-shrink-0 ${isDarkMode ? 'bg-slate-700/50' : 'bg-gray-100'} ${isDarkMode ? 'text-slate-400' : 'text-gray-400'}`}
+            style={{
+              minWidth: '2.5rem',
+              height: '1.5rem',
+              borderRadius: '9999px',
+            }}
+          >
+            <span className="text-xs font-bold leading-none">—</span>
           </div>
         )}
-        {/* Bottom: LTP Value (with more space - main content) - uses same font size as other cells */}
-        <div className={`ltp-value text-right leading-tight w-full flex-1 flex items-end justify-end ${ltpTextSize} overflow-hidden`}>
-          <span className="block truncate w-full text-right">{displayValue ?? (value ?? '')}</span>
+        {/* Bottom: LTP Value (main content) */}
+        <div className={`text-right leading-tight w-full flex-1 flex items-end justify-end ${ltpTextSize} overflow-hidden`}>
+          <span className="block truncate w-full text-right">
+            {displayValue || (value != null ? String(value) : '-')}
+          </span>
         </div>
       </div>
     </td>

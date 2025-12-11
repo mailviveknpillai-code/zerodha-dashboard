@@ -1,0 +1,21 @@
+{
+  "name": "zerodha-provisioning-api",
+  "version": "1.0.0",
+  "description": "Provisioning API for Zerodha Dashboard installation",
+  "main": "provisioning-api-redis.js",
+  "scripts": {
+    "start": "node provisioning-api-redis.js",
+    "dev": "node provisioning-api-redis.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "redis": "^4.6.10",
+    "axios": "^1.6.2",
+    "archiver": "^6.0.1",
+    "dotenv": "^16.3.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
+

@@ -1,10 +1,27 @@
 import React from 'react';
 import { useTheme } from '../contexts/ThemeContext';
-import useMarketTrend from '../hooks/useMarketTrend';
 
 export default function StrikeTrendPanel({ derivativesData, isOpen, onToggle }) {
   const { isDarkMode } = useTheme();
-  const marketTrend = useMarketTrend(derivativesData);
+  const previousTrendRef = React.useRef({ classification: 'Neutral', score: 0 });
+  
+  // Read trend from backend (calculated from API polled values with discrete window intervals)
+  // Trend is updated in UI at frontend refresh rate, but calculation happens at window boundaries
+  // IMPORTANT: Preserve previous value if current is null/undefined to prevent reset to 0 during refresh
+  const currentTrend = derivativesData?.trendClassification && derivativesData?.trendScore != null
+    ? {
+        classification: derivativesData.trendClassification,
+        score: Number(derivativesData.trendScore)
+      }
+    : null;
+  
+  // Update ref when we have a valid value (including 0, as 0 is a valid score)
+  if (currentTrend !== null) {
+    previousTrendRef.current = currentTrend;
+  }
+  
+  // Use current trend if available, otherwise preserve previous (prevents reset to 0 during refresh)
+  const marketTrend = currentTrend || previousTrendRef.current;
 
   const containerClasses = [
     'transition-all duration-300 ease-in-out border-l',
@@ -80,6 +97,10 @@ export default function StrikeTrendPanel({ derivativesData, isOpen, onToggle }) 
     </div>
   );
 }
+
+
+
+
 
 
 
