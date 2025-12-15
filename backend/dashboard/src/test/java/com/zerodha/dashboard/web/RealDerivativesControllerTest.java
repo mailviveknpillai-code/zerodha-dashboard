@@ -1,6 +1,5 @@
 package com.zerodha.dashboard.web;
 
-import com.zerodha.dashboard.adapter.BreezeApiAdapter;
 import com.zerodha.dashboard.adapter.ZerodhaApiAdapter;
 import com.zerodha.dashboard.model.DerivativesChain;
 import com.zerodha.dashboard.service.MockDataService;
@@ -27,9 +26,6 @@ import com.zerodha.dashboard.model.DerivativeContract;
 class RealDerivativesControllerTest {
 
     @Mock
-    private BreezeApiAdapter breezeApiAdapter;
-
-    @Mock
     private ZerodhaApiAdapter zerodhaApiAdapter;
 
     @Mock
@@ -43,7 +39,6 @@ class RealDerivativesControllerTest {
 
     @BeforeEach
     void setUp() {
-        ReflectionTestUtils.setField(controller, "breezeApiEnabled", false);
         ReflectionTestUtils.setField(controller, "zerodhaEnabled", true);
         ReflectionTestUtils.setField(controller, "mockDataEnabled", false);
     }
@@ -77,18 +72,6 @@ class RealDerivativesControllerTest {
         assertThat(response.getBody()).isInstanceOf(DerivativesChain.class);
     }
 
-    @Test
-    void shouldFallbackToBreezeWhenZerodhaDisabled() {
-        ReflectionTestUtils.setField(controller, "zerodhaEnabled", false);
-        ReflectionTestUtils.setField(controller, "breezeApiEnabled", true);
-        DerivativesChain chain = new DerivativesChain("NIFTY", BigDecimal.valueOf(25000));
-        when(breezeApiAdapter.getDerivativesChain("NIFTY")).thenReturn(Optional.of(chain));
-
-        ResponseEntity<?> response = controller.getRealDerivativesChain("NIFTY");
-
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(((DerivativesChain) response.getBody()).getUnderlying()).isEqualTo("NIFTY");
-    }
 
     @Test
     void shouldUseMockDataWhenEnabled() {
@@ -105,7 +88,6 @@ class RealDerivativesControllerTest {
     @Test
     void shouldReturnEmptyChainWhenNoSourcesAvailable() {
         ReflectionTestUtils.setField(controller, "zerodhaEnabled", false);
-        ReflectionTestUtils.setField(controller, "breezeApiEnabled", false);
         ReflectionTestUtils.setField(controller, "mockDataEnabled", false);
 
         ResponseEntity<?> response = controller.getRealDerivativesChain("NIFTY");
@@ -118,7 +100,6 @@ class RealDerivativesControllerTest {
     @Test
     void shouldReturnBadRequestForInvalidSegment() {
         ReflectionTestUtils.setField(controller, "zerodhaEnabled", false);
-        ReflectionTestUtils.setField(controller, "breezeApiEnabled", true);
 
         ResponseEntity<?> response = controller.getRealDerivativesBySegment("INVALID", "NIFTY");
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
@@ -126,9 +107,9 @@ class RealDerivativesControllerTest {
 
     @Test
     void shouldHandleExceptionFromAdapters() {
-        ReflectionTestUtils.setField(controller, "breezeApiEnabled", true);
-        ReflectionTestUtils.setField(controller, "zerodhaEnabled", false);
-        when(breezeApiAdapter.getDerivativesChain("NIFTY")).thenThrow(new RuntimeException("boom"));
+        ReflectionTestUtils.setField(controller, "zerodhaEnabled", true);
+        when(zerodhaSessionService.hasActiveAccessToken()).thenReturn(true);
+        when(zerodhaApiAdapter.getDerivativesChain("NIFTY")).thenThrow(new RuntimeException("boom"));
 
         ResponseEntity<?> response = controller.getRealDerivativesChain("NIFTY");
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
@@ -136,14 +117,14 @@ class RealDerivativesControllerTest {
 
     @Test
     void getRealDerivativesBySegmentReturnsFutures() {
-        ReflectionTestUtils.setField(controller, "zerodhaEnabled", false);
-        ReflectionTestUtils.setField(controller, "breezeApiEnabled", true);
+        ReflectionTestUtils.setField(controller, "zerodhaEnabled", true);
+        when(zerodhaSessionService.hasActiveAccessToken()).thenReturn(true);
         DerivativeContract contract = new DerivativeContract();
         contract.setInstrumentType("FUT");
         contract.setSegment("FUTURES");
         DerivativesChain chain = new DerivativesChain("NIFTY", BigDecimal.ONE);
         chain.addFutures(contract);
-        when(breezeApiAdapter.getDerivativesChain("NIFTY")).thenReturn(Optional.of(chain));
+        when(zerodhaApiAdapter.getDerivativesChain("NIFTY")).thenReturn(Optional.of(chain));
 
         ResponseEntity<?> response = controller.getRealDerivativesBySegment("FUTURES", "NIFTY");
 
@@ -153,15 +134,15 @@ class RealDerivativesControllerTest {
 
     @Test
     void getRealStrikePriceMonitoringReturnsData() {
-        ReflectionTestUtils.setField(controller, "zerodhaEnabled", false);
-        ReflectionTestUtils.setField(controller, "breezeApiEnabled", true);
+        ReflectionTestUtils.setField(controller, "zerodhaEnabled", true);
+        when(zerodhaSessionService.hasActiveAccessToken()).thenReturn(true);
         DerivativeContract call = new DerivativeContract();
         call.setInstrumentType("CE");
         call.setStrikePrice(BigDecimal.valueOf(25000));
         DerivativesChain chain = new DerivativesChain("NIFTY", BigDecimal.valueOf(25000));
         chain.setDailyStrikePrice(BigDecimal.valueOf(25000));
         chain.addCallOption(call);
-        when(breezeApiAdapter.getDerivativesChain("NIFTY")).thenReturn(Optional.of(chain));
+        when(zerodhaApiAdapter.getDerivativesChain("NIFTY")).thenReturn(Optional.of(chain));
 
         ResponseEntity<?> response = controller.getRealStrikePriceMonitoring("NIFTY");
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);

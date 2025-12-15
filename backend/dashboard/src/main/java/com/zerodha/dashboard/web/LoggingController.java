@@ -14,7 +14,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/logs")
-@CrossOrigin(origins = "*") // Allow CORS for logging endpoint
+// CORS handled by CorsConfig
 public class LoggingController {
     
     private static final Logger log = LoggerFactory.getLogger(LoggingController.class);
@@ -53,6 +53,7 @@ public class LoggingController {
         return ResponseEntity.ok().body("Logging service is running");
     }
 }
+
 
 
 

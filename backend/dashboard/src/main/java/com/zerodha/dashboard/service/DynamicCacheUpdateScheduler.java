@@ -1,8 +1,8 @@
 package com.zerodha.dashboard.service;
 
 import com.zerodha.dashboard.adapter.ZerodhaApiAdapter;
+import com.zerodha.dashboard.constants.WindowConstants;
 import com.zerodha.dashboard.model.DerivativesChain;
-import com.zerodha.dashboard.model.DerivativeContract;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -12,8 +12,8 @@ import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
-import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ScheduledFuture;
@@ -30,11 +30,10 @@ public class DynamicCacheUpdateScheduler {
     
     private final ZerodhaApiAdapter zerodhaApiAdapter;
     private final LatestSnapshotCacheService latestSnapshotCacheService;
+    private final BasicValuesCacheService basicValuesCacheService; // Separate cache for basic values (8 columns)
     private final ZerodhaSessionService zerodhaSessionService;
-    private final EatenDeltaService eatenDeltaService;
-    private final LtpMovementService ltpMovementService;
-    private final TrendCalculationService trendCalculationService;
-    private final SpotLtpTrendService spotLtpTrendService;
+    // Independent metric services - each operates as a microservice
+    private final List<IndependentMetricService> independentServices;
     private final TaskScheduler taskScheduler;
     private final StringRedisTemplate redisTemplate;
     
@@ -50,6 +49,12 @@ public class DynamicCacheUpdateScheduler {
     private ScheduledFuture<?> scheduledTask;
     private volatile long currentIntervalMs;
     
+    // Track scheduled time for exact interval maintenance
+    private volatile long nextScheduledTimeMs = 0;
+    
+    // Prevent overlapping executions - simple flag check
+    private volatile boolean updateInProgress = false;
+    
     // API polling error tracking
     private volatile Instant lastSuccessfulPoll = null;
     private volatile Instant lastFailedPoll = null;
@@ -60,22 +65,19 @@ public class DynamicCacheUpdateScheduler {
     public DynamicCacheUpdateScheduler(
             ZerodhaApiAdapter zerodhaApiAdapter,
             LatestSnapshotCacheService latestSnapshotCacheService,
+            BasicValuesCacheService basicValuesCacheService,
             ZerodhaSessionService zerodhaSessionService,
-            EatenDeltaService eatenDeltaService,
-            LtpMovementService ltpMovementService,
-            TrendCalculationService trendCalculationService,
-            SpotLtpTrendService spotLtpTrendService,
             TaskScheduler taskScheduler,
-            StringRedisTemplate redisTemplate) {
+            StringRedisTemplate redisTemplate,
+            List<IndependentMetricService> independentServices) {
         this.zerodhaApiAdapter = zerodhaApiAdapter;
         this.latestSnapshotCacheService = latestSnapshotCacheService;
+        this.basicValuesCacheService = basicValuesCacheService;
         this.zerodhaSessionService = zerodhaSessionService;
-        this.eatenDeltaService = eatenDeltaService;
-        this.ltpMovementService = ltpMovementService;
-        this.trendCalculationService = trendCalculationService;
-        this.spotLtpTrendService = spotLtpTrendService;
         this.taskScheduler = taskScheduler;
         this.redisTemplate = redisTemplate;
+        // Initialize independent services list (injected by Spring)
+        this.independentServices = independentServices != null ? independentServices : List.of();
     }
     
     @PostConstruct
@@ -87,24 +89,32 @@ public class DynamicCacheUpdateScheduler {
         }
         currentIntervalMs = interval;
         startScheduler(interval);
-        log.info("Dynamic cache update scheduler initialized with interval: {}ms", interval);
+        log.info("Dynamic cache update scheduler initialized with interval: {}ms ({}s)", 
+            interval, interval / 1000.0);
     }
     
     @PreDestroy
     public void shutdown() {
+        log.info("Shutting down DynamicCacheUpdateScheduler...");
         stopScheduler();
+        // Clear error tracking state
+        lastSuccessfulPoll = null;
+        lastFailedPoll = null;
+        lastError = null;
+        consecutiveFailures = 0;
+        log.info("DynamicCacheUpdateScheduler shutdown complete");
     }
     
     /**
      * Update the polling interval dynamically.
-     * @param intervalMs New interval in milliseconds (must be >= 250ms)
+     * @param intervalMs New interval in milliseconds (must be >= MIN_API_POLLING_INTERVAL_MS)
      */
     public void updateInterval(long intervalMs) {
         long oldIntervalMs = currentIntervalMs;
         
-        if (intervalMs < 250) {
-            log.warn("Interval {}ms is too low, using minimum 250ms", intervalMs);
-            intervalMs = 250;
+        if (intervalMs < WindowConstants.MIN_API_POLLING_INTERVAL_MS) {
+            log.warn("Interval {}ms is too low, using minimum {}ms", intervalMs, WindowConstants.MIN_API_POLLING_INTERVAL_MS);
+            intervalMs = WindowConstants.MIN_API_POLLING_INTERVAL_MS;
         }
         
         if (intervalMs == currentIntervalMs) {
@@ -115,9 +125,9 @@ public class DynamicCacheUpdateScheduler {
         log.info("Updating API polling interval from {}ms ({}s) to {}ms ({}s)", 
             oldIntervalMs, oldIntervalMs / 1000.0, intervalMs, intervalMs / 1000.0);
         
-        if (intervalMs < 1500) {
-            log.warn("WARNING: API polling interval set to {}ms ({}s) - values below 1.5s may cause crashes or rate limiting", 
-                intervalMs, intervalMs / 1000.0);
+        if (intervalMs < WindowConstants.WARNING_API_POLLING_INTERVAL_MS) {
+            log.warn("WARNING: API polling interval set to {}ms ({}s) - values below {}ms may cause crashes or rate limiting", 
+                intervalMs, intervalMs / 1000.0, WindowConstants.WARNING_API_POLLING_INTERVAL_MS);
         }
         
         currentIntervalMs = intervalMs;
@@ -148,40 +158,92 @@ public class DynamicCacheUpdateScheduler {
         
         stopScheduler(); // Ensure no duplicate tasks
         
-        scheduledTask = taskScheduler.scheduleWithFixedDelay(
-            this::updateCache,
-            Duration.ofMillis(intervalMs)
+        // Initialize scheduled time
+        nextScheduledTimeMs = System.currentTimeMillis();
+        
+        // Start immediately, then self-schedule at exact intervals
+        // This prevents task queuing that causes inconsistent updates
+        updateCacheAndScheduleNext(intervalMs);
+        
+        log.info("Started cache update scheduler with interval: {}ms ({}s)", 
+            intervalMs, intervalMs / 1000.0);
+    }
+    
+    /**
+     * CRITICAL: API polling happens at EXACT intervals, completely independent of processing.
+     * 
+     * Flow:
+     * 1. Schedule next poll at exact interval (based on start time)
+     * 2. Check if previous API call is still in progress - if yes, skip (prevent overlapping)
+     * 3. Make API call (synchronous - wait for Zerodha response)
+     * 4. Update cache immediately with raw data
+     * 5. Features fetch from live response and process (doesn't block next poll)
+     * 6. Next poll happens at exact scheduled time (independent of processing)
+     * 
+     * This ensures:
+     * - API polling happens at exact configured intervals (not affected by processing)
+     * - Only one API call at a time (no overlapping - skip if previous still in progress)
+     * - Cache is updated immediately after API response
+     * - Features process from live response (consistent)
+     * - Processing doesn't affect polling schedule
+     */
+    private void updateCacheAndScheduleNext(long intervalMs) {
+        // Record when this poll was scheduled to run
+        long scheduledTime = nextScheduledTimeMs;
+        if (scheduledTime == 0) {
+            scheduledTime = System.currentTimeMillis();
+        }
+        
+        // CRITICAL: Schedule next poll IMMEDIATELY based on exact interval
+        // This ensures polling happens at exact intervals regardless of processing
+        long nextScheduled = scheduledTime + intervalMs;
+        long now = System.currentTimeMillis();
+        long delay = Math.max(0, nextScheduled - now);
+        
+        // Update scheduled time for next iteration
+        nextScheduledTimeMs = nextScheduled;
+        
+        // Schedule next poll at exact interval (independent of processing)
+        Instant nextExecutionTime = Instant.now().plusMillis(delay);
+        scheduledTask = taskScheduler.schedule(
+            () -> updateCacheAndScheduleNext(intervalMs),
+            nextExecutionTime
         );
         
-        log.debug("Started cache update scheduler with interval: {}ms", intervalMs);
-    }
-    
-    private void stopScheduler() {
-        if (scheduledTask != null && !scheduledTask.isCancelled()) {
-            scheduledTask.cancel(false);
-            scheduledTask = null;
-            log.debug("Stopped cache update scheduler");
+        // Check if previous API call is still in progress - prevent overlapping
+        if (updateInProgress) {
+            log.debug("Previous API call still in progress, skipping this poll (polling continues at exact intervals)");
+            return;
         }
-    }
-    
-    private void updateCache() {
+        
         if (!cacheUpdateEnabled || !zerodhaEnabled) {
             return;
         }
         
-        if (!zerodhaSessionService.hasActiveAccessToken()) {
-            log.debug("Skipping cache update - Zerodha session not active");
-            lastError = "Zerodha session not active";
-            lastFailedPoll = Instant.now();
-            consecutiveFailures++;
-            return;
-        }
+        // Set in-progress flag for API call
+        updateInProgress = true;
         
         try {
-            log.debug("Scheduled cache update started (interval: {}ms)", currentIntervalMs);
+            if (!zerodhaSessionService.hasActiveAccessToken()) {
+                log.debug("Skipping API poll - Zerodha session not active");
+                lastError = "Zerodha session not active";
+                lastFailedPoll = Instant.now();
+                consecutiveFailures++;
+                return;
+            }
             
-            // STEP 1: Fetch RAW data from API (no calculations yet)
+            long apiCallStartTime = System.currentTimeMillis();
+            log.debug("API poll started (interval: {}ms)", currentIntervalMs);
+            
+            // STEP 1: Make API call to Zerodha (synchronous - wait for response)
+            // CRITICAL: API call waits for Zerodha response
+            // This is the only blocking operation - everything else is independent
             Optional<DerivativesChain> chainOpt = zerodhaApiAdapter.getDerivativesChain("NIFTY");
+            
+            long apiCallDuration = System.currentTimeMillis() - apiCallStartTime;
+            if (apiCallDuration > 100) {
+                log.warn("API call took {}ms (unusually slow)", apiCallDuration);
+            }
             
             if (!chainOpt.isPresent()) {
                 log.warn("API polling failed: No data returned from Zerodha API");
@@ -196,60 +258,87 @@ public class DynamicCacheUpdateScheduler {
                 return;
             }
             
-            // STEP 2: Get RAW chain
-            DerivativesChain rawChain = chainOpt.get();
-            
-            // NOTE: TrendCalculationService maintains its own internal cache and state
-            // It handles trend calculation independently at API polling intervals
-            
-            // STEP 3: Store RAW data in master cache FIRST (before any calculations)
-            // This ensures the master cache always has the latest raw data
-            // CRITICAL: Master cache stores RAW data only - no calculations
-            // NOTE: We don't update cache here anymore - we update after calculations
-            
-            // STEP 4: Perform calculations on the RAW chain
-            // Each calculation service maintains its own separate data structures:
-            // - EatenDeltaService: previousSnapshots, windowDataMap (independent per instrument)
-            // - TrendCalculationService: futuresWindowData, callsWindowData, putsWindowData (independent FIFO stacks)
-            // - LtpMovementService: previousLtpSnapshots, movementDataMap (independent per instrument)
-            // These services read from the chain and update their own internal state independently
-            
-            // Calculate eaten delta (maintains its own internal state - previousSnapshots, windowDataMap)
-            calculateEatenDeltaForChain(rawChain);
-            
-            // Calculate trend indicator (uses in-memory FIFO cache - matching release logic)
-            // Calculation happens at API polling intervals, result is displayed at UI refresh rate
-            trendCalculationService.calculateTrend(rawChain);
-            
-            // Calculate spot LTP trend (average movement over configured window)
-            spotLtpTrendService.calculateSpotLtpTrend(rawChain);
-            
-            // Calculate LTP movement based on API-polled LTP (independent cache in LtpMovementService)
-            calculateLtpMovementForChain(rawChain);
-            
-            // STEP 5: Update master cache with calculated values
-            // TrendCalculationService handles its own state and always sets valid trend on the chain
-            latestSnapshotCacheService.updateCache(rawChain);
-            
-            // Success - reset error tracking
+            // Success - update tracking
             lastSuccessfulPoll = Instant.now();
             lastError = null;
             consecutiveFailures = 0;
             
-            log.debug("Cache updated successfully with {} contracts (raw data + calculations)", 
-                rawChain.getTotalContracts());
+            // STEP 2: Get RAW chain from API response
+            DerivativesChain rawChain = chainOpt.get();
+            
+            // STEP 3: Update cache IMMEDIATELY with raw data
+            // CRITICAL: Cache is updated immediately after API response
+            // All other processes (except features) will fetch from cache
+            basicValuesCacheService.updateCache(rawChain);
+            latestSnapshotCacheService.updateCache(rawChain);
+            log.debug("Cache updated immediately with raw data from API response");
+            
+            // STEP 4: Clear in-progress flag - allows next poll to proceed
+            // Processing happens but doesn't block next API poll
+            updateInProgress = false;
+            
+            // STEP 5: Process features using live response (doesn't block next poll)
+            // CRITICAL: Features fetch from live response directly (not cache) for consistency
+            // Processing happens independently - doesn't affect polling schedule
+            // Feature calculations are INDEPENDENT of API polling rate:
+            // - Each service operates as a microservice with own window management
+            // - Windows are epoch-aligned time boundaries (e.g., 0-3s, 3-6s for 3s window)
+            // - Services collect data points at each API polling cycle
+            // - Final values are calculated and stored when windows complete (at epoch boundaries)
+            // - Window completion is based on configured window intervals, NOT API polling rate
+            for (IndependentMetricService service : independentServices) {
+                if (!service.isEnabled()) {
+                    continue;
+                }
                 
+                try {
+                    // Each service processes independently - isolated error handling
+                    // Services use the live response directly (not cache) for calculations
+                    // They collect data points and calculate based on window intervals
+                    // Final values are stored in MetricsCacheService when windows complete
+                    // They also populate window metadata on the chain (for UI timers)
+                    // Basic values (LTP, Bid Qty, Ask Qty, Delta) are NOT modified
+                    boolean success = service.process(rawChain);
+                    if (!success) {
+                        log.warn("{} service returned false, but continuing with other services", 
+                            service.getServiceName());
+                    }
+                } catch (Exception e) {
+                    // Isolated error handling - one service failure doesn't affect others
+                    log.error("Error in {} service: {}", service.getServiceName(), e.getMessage(), e);
+                    // Continue with next service
+                }
+            }
+            
+            // STEP 6: Update cache with processed data (includes window metadata)
+            // This ensures window metadata from features is available in cache
+            basicValuesCacheService.updateCache(rawChain);
+            latestSnapshotCacheService.updateCache(rawChain);
+            log.debug("Cache updated with processed data (includes window metadata)");
+            
+            long apiCallDurationTotal = System.currentTimeMillis() - apiCallStartTime;
+            log.debug("API poll and processing completed in {}ms for {} contracts", 
+                apiCallDurationTotal, rawChain.getTotalContracts());
+            
         } catch (Exception e) {
-            log.error("Error updating cache in scheduled task: {}", e.getMessage(), e);
+            log.error("Error during API polling: {}", e.getMessage(), e);
             lastError = e.getMessage();
             lastFailedPoll = Instant.now();
             consecutiveFailures++;
+            updateInProgress = false; // Clear flag on error
             
             if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
                 log.error("WARNING: API polling has failed {} consecutive times. Last error: {}", 
                     consecutiveFailures, lastError);
             }
-            // Don't throw - allow scheduler to continue
+        }
+    }
+    
+    private void stopScheduler() {
+        if (scheduledTask != null && !scheduledTask.isCancelled()) {
+            scheduledTask.cancel(false);
+            scheduledTask = null;
+            log.debug("Stopped cache update scheduler");
         }
     }
     
@@ -273,7 +362,7 @@ public class DynamicCacheUpdateScheduler {
             String value = redisTemplate.opsForValue().get(REDIS_KEY_INTERVAL);
             if (value != null) {
                 long interval = Long.parseLong(value);
-                if (interval >= 250) {
+                if (interval >= WindowConstants.MIN_API_POLLING_INTERVAL_MS) {
                     return interval;
                 }
             }
@@ -292,176 +381,8 @@ public class DynamicCacheUpdateScheduler {
         }
     }
     
-    /**
-     * Calculate eaten delta for all contracts in the chain.
-     * This is called on every tick to update the eaten delta values.
-     */
-    private void calculateEatenDeltaForChain(DerivativesChain chain) {
-        if (chain == null) {
-            log.warn("calculateEatenDeltaForChain: chain is null");
-            return;
-        }
-        
-        int futuresCount = 0;
-        int callOptionsCount = 0;
-        int putOptionsCount = 0;
-        int errorsCount = 0;
-        
-        try {
-            // Process futures
-            if (chain.getFutures() != null) {
-                for (DerivativeContract contract : chain.getFutures()) {
-                    try {
-                        // calculateEatenDelta sets eatenDelta, bidEaten, and askEaten on the contract
-                        eatenDeltaService.calculateEatenDelta(contract);
-                        // Values are already set on contract by calculateEatenDelta
-                        futuresCount++;
-                    } catch (Exception e) {
-                        log.error("Error calculating eatenDelta for futures contract {}: {}", 
-                            contract != null ? contract.getInstrumentToken() : "null", e.getMessage(), e);
-                        errorsCount++;
-                        // Set to 0 on error for all eaten values
-                        if (contract != null) {
-                            contract.setEatenDelta(0L);
-                            contract.setBidEaten(0L);
-                            contract.setAskEaten(0L);
-                        }
-                    }
-                }
-            }
-            
-            // Process call options
-            if (chain.getCallOptions() != null) {
-                for (DerivativeContract contract : chain.getCallOptions()) {
-                    try {
-                        // calculateEatenDelta sets eatenDelta, bidEaten, and askEaten on the contract
-                        eatenDeltaService.calculateEatenDelta(contract);
-                        // Values are already set on contract by calculateEatenDelta
-                        callOptionsCount++;
-                    } catch (Exception e) {
-                        log.error("Error calculating eatenDelta for call option {}: {}", 
-                            contract != null ? contract.getInstrumentToken() : "null", e.getMessage(), e);
-                        errorsCount++;
-                        // Set to 0 on error for all eaten values
-                        if (contract != null) {
-                            contract.setEatenDelta(0L);
-                            contract.setBidEaten(0L);
-                            contract.setAskEaten(0L);
-                        }
-                    }
-                }
-            }
-            
-            // Process put options
-            if (chain.getPutOptions() != null) {
-                for (DerivativeContract contract : chain.getPutOptions()) {
-                    try {
-                        // calculateEatenDelta sets eatenDelta, bidEaten, and askEaten on the contract
-                        eatenDeltaService.calculateEatenDelta(contract);
-                        // Values are already set on contract by calculateEatenDelta
-                        putOptionsCount++;
-                    } catch (Exception e) {
-                        log.error("Error calculating eatenDelta for put option {}: {}", 
-                            contract != null ? contract.getInstrumentToken() : "null", e.getMessage(), e);
-                        errorsCount++;
-                        // Set to 0 on error for all eaten values
-                        if (contract != null) {
-                            contract.setEatenDelta(0L);
-                            contract.setBidEaten(0L);
-                            contract.setAskEaten(0L);
-                        }
-                    }
-                }
-            }
-            
-            log.debug("calculateEatenDeltaForChain completed: futures={}, calls={}, puts={}, errors={}", 
-                futuresCount, callOptionsCount, putOptionsCount, errorsCount);
-        } catch (Exception e) {
-            log.error("Fatal error in calculateEatenDeltaForChain: {}", e.getMessage(), e);
-        }
-    }
-    
-    /**
-     * Calculate LTP movement for all contracts in the chain.
-     * This is called on every tick to update the LTP movement values.
-     */
-    private void calculateLtpMovementForChain(DerivativesChain chain) {
-        if (chain == null) {
-            log.warn("calculateLtpMovementForChain: chain is null");
-            return;
-        }
-        
-        int futuresCount = 0;
-        int callOptionsCount = 0;
-        int putOptionsCount = 0;
-        int errorsCount = 0;
-        
-        try {
-            // Process futures
-            if (chain.getFutures() != null) {
-                for (com.zerodha.dashboard.model.DerivativeContract contract : chain.getFutures()) {
-                    try {
-                        ltpMovementService.calculateLtpMovement(contract);
-                        futuresCount++;
-                    } catch (Exception e) {
-                        log.error("Error calculating LTP movement for futures contract {}: {}", 
-                            contract != null ? contract.getInstrumentToken() : "null", e.getMessage(), e);
-                        errorsCount++;
-                        // Set defaults on error
-                        if (contract != null) {
-                            contract.setLtpMovementDirection("NEUTRAL");
-                            contract.setLtpMovementConfidence(0);
-                            contract.setLtpMovementIntensity("SLOW");
-                        }
-                    }
-                }
-            }
-            
-            // Process call options
-            if (chain.getCallOptions() != null) {
-                for (com.zerodha.dashboard.model.DerivativeContract contract : chain.getCallOptions()) {
-                    try {
-                        ltpMovementService.calculateLtpMovement(contract);
-                        callOptionsCount++;
-                    } catch (Exception e) {
-                        log.error("Error calculating LTP movement for call option {}: {}", 
-                            contract != null ? contract.getInstrumentToken() : "null", e.getMessage(), e);
-                        errorsCount++;
-                        // Set defaults on error
-                        if (contract != null) {
-                            contract.setLtpMovementDirection("NEUTRAL");
-                            contract.setLtpMovementConfidence(0);
-                            contract.setLtpMovementIntensity("SLOW");
-                        }
-                    }
-                }
-            }
-            
-            // Process put options
-            if (chain.getPutOptions() != null) {
-                for (com.zerodha.dashboard.model.DerivativeContract contract : chain.getPutOptions()) {
-                    try {
-                        ltpMovementService.calculateLtpMovement(contract);
-                        putOptionsCount++;
-                    } catch (Exception e) {
-                        log.error("Error calculating LTP movement for put option {}: {}", 
-                            contract != null ? contract.getInstrumentToken() : "null", e.getMessage(), e);
-                        errorsCount++;
-                        // Set defaults on error
-                        if (contract != null) {
-                            contract.setLtpMovementDirection("NEUTRAL");
-                            contract.setLtpMovementConfidence(0);
-                            contract.setLtpMovementIntensity("SLOW");
-                        }
-                    }
-                }
-            }
-            
-            log.debug("calculateLtpMovementForChain completed: futures={}, calls={}, puts={}, errors={}", 
-                futuresCount, callOptionsCount, putOptionsCount, errorsCount);
-        } catch (Exception e) {
-            log.error("Fatal error in calculateLtpMovementForChain: {}", e.getMessage(), e);
-        }
-    }
+    // REMOVED: calculateEatenDeltaForChain() - Now handled by IndependentBidAskEatenService
+    // REMOVED: calculateLtpMovementForChain() - Now handled by IndependentLtpMovementService
+    // These methods are redundant as each independent service handles its own processing
 }
 

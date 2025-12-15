@@ -1,11 +1,16 @@
 import { useCallback, useRef, useState, useEffect } from 'react'
-import { fetchLatest } from '../api/client'
+import { fetchBasic, fetchLatest } from '../api/client'
 import useContinuousPolling from './useContinuousPolling'
 import logger from '../utils/logger'
 
 /**
- * Hook to poll the /latest endpoint for cached snapshots.
- * This is optimized for high-frequency polling with minimal backend load.
+ * Hook to poll endpoints for derivatives data.
+ * 
+ * If useBasic=true: Polls /api/basic for basic values only (8 columns) at UI refresh rate.
+ * If useBasic=false: Polls /api/latest for enriched data (basic + metrics) - backward compatibility.
+ * 
+ * CRITICAL: When useBasic=true, this hook returns ONLY basic values from API polling - NO calculated metrics.
+ * Use useMetricsFeed hook separately to get calculated metrics at their own intervals.
  */
 export default function useLatestDerivativesFeed({
   symbol = 'NIFTY',
@@ -13,6 +18,7 @@ export default function useLatestDerivativesFeed({
   onConnectionStatusChange,
   onAuthFailure,
   fallbackToFullFetch = true, // Fallback to full fetch if cache is empty
+  useBasic = true, // If true, use /api/basic; if false, use /api/latest (backward compatibility)
 }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -41,15 +47,18 @@ export default function useLatestDerivativesFeed({
     try {
       inFlightRef.current = true
       const requestStartTime = Date.now()
-      logger.debug(`[useLatestDerivativesFeed] Fetching /latest for ${symbol} at ${new Date().toISOString()}`)
+      const endpoint = useBasic ? '/api/basic' : '/api/latest'
+      logger.debug(`[useLatestDerivativesFeed] Fetching ${endpoint} for ${symbol} at ${new Date().toISOString()}`)
       
       if (initialLoadRef.current) {
         setLoading(true)
       }
 
-      const payload = await fetchLatest(symbol, abortController.signal)
+      const payload = useBasic 
+        ? await fetchBasic(symbol, abortController.signal)
+        : await fetchLatest(symbol, abortController.signal)
       const requestDuration = Date.now() - requestStartTime
-      logger.debug(`[useLatestDerivativesFeed] /latest fetch completed in ${requestDuration}ms`)
+      logger.debug(`[useLatestDerivativesFeed] ${endpoint} fetch completed in ${requestDuration}ms`)
 
       if (!payload) {
         throw new Error('No data returned from latest endpoint')
@@ -134,7 +143,7 @@ export default function useLatestDerivativesFeed({
         abortControllerRef.current = null
       }
     }
-  }, [symbol, onConnectionStatusChange, onAuthFailure, fallbackToFullFetch])
+  }, [symbol, onConnectionStatusChange, onAuthFailure, fallbackToFullFetch, useBasic])
   
   // Cleanup on unmount
   useEffect(() => {

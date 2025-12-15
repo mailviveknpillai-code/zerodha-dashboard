@@ -6,11 +6,19 @@ import { ContractColorProvider, useContractColoringContext } from '../contexts/C
 import { useRefreshInterval } from '../contexts/RefreshIntervalContext';
 import { useVolumeWindow } from '../contexts/VolumeWindowContext';
 import useLatestDerivativesFeed from '../hooks/useLatestDerivativesFeed';
+import useMetricsFeed from '../hooks/useMetricsFeed';
 import { fetchDerivatives, getApiPollingStatus } from '../api/client';
 import { useTheme } from '../contexts/ThemeContext';
+import { useTrendAveraging } from '../contexts/TrendAveragingContext';
+import { useEatenDeltaWindow } from '../contexts/EatenDeltaWindowContext';
+import { useLtpMovementCacheSize } from '../contexts/LtpMovementCacheSizeContext';
+import { useLtpMovementWindow } from '../contexts/LtpMovementWindowContext';
+import { useSpotLtpInterval } from '../contexts/SpotLtpIntervalContext';
 import logger from '../utils/logger';
 import { useIncrementalVolumeMap } from '../hooks/useIncrementalVolume';
 import useEatenValuesCache from '../hooks/useEatenValuesCache';
+import { useOrganizedData } from '../hooks/useOrganizedData';
+import { formatPrice, formatInteger, formatStrikeValue, formatChange, formatChangePercent } from '../utils/formatters';
 
 function DerivativesDashboard({ 
   selectedContract,
@@ -46,10 +54,10 @@ function DerivativesDashboard({
       // This runs in parallel with /latest polling
       fetchDerivatives('NIFTY')
         .then(data => {
-          console.debug('Initial cache population completed:', data?.totalContracts || 0, 'contracts');
+          logger.debug('Initial cache population completed:', data?.totalContracts || 0, 'contracts');
         })
         .catch(err => {
-          console.error('Initial fetch failed (will retry via polling):', err);
+          logger.error('Initial fetch failed (will retry via polling):', err);
         });
     }
   }, []);
@@ -90,8 +98,10 @@ function DerivativesDashboard({
     };
 
     // Initial check and interval
+    // Status check uses 500ms interval - this is intentional to ensure backend timer-based
+    // features update values immediately in the UI
     checkStatus();
-    const id = setInterval(checkStatus, 5000);
+    const id = setInterval(checkStatus, 500);
 
     return () => {
       cancelled = true;
@@ -99,16 +109,135 @@ function DerivativesDashboard({
     };
   }, []);
   
-  // Use /latest endpoint for high-frequency polling (cached, fast)
-  // Polls immediately - will return empty data until cache is populated by initial fetch or scheduler
+  // Get metric interval settings from contexts
+  const { averagingWindowSeconds: trendWindowSeconds } = useTrendAveraging();
+  const { windowSeconds: eatenDeltaWindowSeconds } = useEatenDeltaWindow();
+  const { windowSeconds: ltpMovementWindowSeconds } = useLtpMovementWindow();
+  const { intervalSeconds: spotLtpWindowSeconds } = useSpotLtpInterval();
   
-  const { data: derivativesData, loading } = useLatestDerivativesFeed({
+  // Fetch basic values at UI refresh rate (8 columns: LTP, Bid Qty, Ask Qty, Delta, Bid Price, Ask Price, Volume, OI)
+  const { data: basicData, loading: basicLoading } = useLatestDerivativesFeed({
     symbol: 'NIFTY',
-    intervalMs,
+    intervalMs, // UI refresh rate
     onConnectionStatusChange,
     onAuthFailure: () => navigate('/', { replace: true }),
     fallbackToFullFetch: false,
   });
+  
+  // Fetch chain-level metrics at UI refresh rate
+  // CRITICAL: Feature calculations are INDEPENDENT of API polling rate
+  // - API polling rate only controls how often raw data is collected from Zerodha
+  // - Feature calculations happen based on their CONFIGURED WINDOW INTERVALS (trendWindowSeconds)
+  // - Windows are epoch-aligned (e.g., 0-3s, 3-6s, 6-9s for 3s window)
+  // - Final values are calculated and stored when windows complete (at epoch boundaries)
+  // - UI refresh rate controls how often we poll backend to fetch these calculated values
+  // - Polling at UI refresh rate ensures we catch window completions promptly
+  const trendIntervalMs = intervalMs; // Use UI refresh interval from settings
+  const { metrics: trendMetrics } = useMetricsFeed({
+    symbol: 'NIFTY',
+    intervalMs: trendIntervalMs,
+    features: ['trendScore'], // Only trend score
+    onConnectionStatusChange: () => {}, // Metrics errors don't affect connection status
+  });
+  
+  // Spot LTP Trend: Use UI refresh interval
+  // CRITICAL: Feature calculations are INDEPENDENT of API polling rate
+  // - API polling rate only controls how often raw data is collected from Zerodha
+  // - Feature calculations happen based on their CONFIGURED WINDOW INTERVALS (spotLtpWindowSeconds)
+  // - Windows are epoch-aligned (e.g., 0-10s, 10-20s, 20-30s for 10s window)
+  // - Final values are calculated and stored when windows complete (at epoch boundaries)
+  // - UI refresh rate controls how often we poll backend to fetch these calculated values
+  // - Polling at UI refresh rate ensures we catch window completions promptly
+  const spotLtpIntervalMs = intervalMs; // Use UI refresh interval from settings
+  const { metrics: spotLtpMetrics } = useMetricsFeed({
+    symbol: 'NIFTY',
+    intervalMs: spotLtpIntervalMs,
+    features: ['spotLtpMovement'], // Only spot LTP movement
+    onConnectionStatusChange: () => {}, // Metrics errors don't affect connection status
+  });
+  
+  // Contract-level metrics (eatenDelta, ltpMovementDirection) are in basicData
+  // BasicValuesCacheService copies all necessary values, so no enrichedData fetch needed
+  
+  // Merge basic values with chain-level metrics
+  const derivativesData = useMemo(() => {
+    if (!basicData) return null;
+    
+    // Start with basic values (8 columns)
+    const merged = { ...basicData };
+    
+    // Add chain-level metrics from MetricsCacheService (each fetched independently)
+    
+    // Trend Score (fetched at trend window interval)
+    if (trendMetrics?.trendScore) {
+      const trend = trendMetrics.trendScore;
+      merged.trendScore = trend.value;
+      merged.trendClassification = trend.classification;
+      merged.futuresTrendScore = trend.futuresScore;
+      merged.callsTrendScore = trend.callsScore;
+      merged.putsTrendScore = trend.putsScore;
+      merged.trendWindowStart = trend.windowStart;
+      merged.trendWindowEnd = trend.windowEnd;
+      merged.trendWindowSeconds = trendWindowSeconds;
+    }
+    
+    // Spot LTP Trend (fetched at spot LTP window interval - INDEPENDENT)
+    if (spotLtpMetrics?.spotLtpMovement) {
+      const spot = spotLtpMetrics.spotLtpMovement;
+      merged.spotLtpTrendPercent = spot.value;
+      merged.spotLtpTrendDirection = spot.direction;
+      // Include window metadata for timer display
+      if (spot.windowStart) {
+        merged.spotLtpWindowStart = spot.windowStart;
+      }
+      if (spot.windowEnd) {
+        merged.spotLtpWindowEnd = spot.windowEnd;
+      }
+      merged.spotLtpWindowSeconds = spotLtpWindowSeconds; // Use from context
+    }
+    
+    // Eaten Delta window metadata (from basicData)
+    if (basicData?.eatenDeltaWindowStart) {
+      merged.eatenDeltaWindowStart = basicData.eatenDeltaWindowStart;
+    }
+    if (basicData?.eatenDeltaWindowEnd) {
+      merged.eatenDeltaWindowEnd = basicData.eatenDeltaWindowEnd;
+    }
+    if (basicData?.eatenDeltaWindowSeconds) {
+      merged.eatenDeltaWindowSeconds = basicData.eatenDeltaWindowSeconds;
+    } else {
+      merged.eatenDeltaWindowSeconds = eatenDeltaWindowSeconds; // Fallback to context
+    }
+    
+    // LTP Movement window metadata (from basicData)
+    if (basicData?.ltpMovementWindowStart) {
+      merged.ltpMovementWindowStart = basicData.ltpMovementWindowStart;
+    }
+    if (basicData?.ltpMovementWindowEnd) {
+      merged.ltpMovementWindowEnd = basicData.ltpMovementWindowEnd;
+    }
+    if (basicData?.ltpMovementWindowSeconds) {
+      merged.ltpMovementWindowSeconds = basicData.ltpMovementWindowSeconds;
+    } else {
+      merged.ltpMovementWindowSeconds = ltpMovementWindowSeconds; // Fallback to context
+    }
+    
+    // Contract-level metrics (eatenDelta, ltpMovementDirection) are already in basicData
+    // No need to merge with enrichedData - BasicValuesCacheService copies all necessary values
+    
+    return merged;
+  }, [basicData, trendMetrics, spotLtpMetrics, trendWindowSeconds, eatenDeltaWindowSeconds, ltpMovementWindowSeconds]);
+  
+  const loading = basicLoading;
+
+  // Organize derivatives data into structured tables using custom hooks
+  // NOTE: This must be called AFTER derivativesData is defined
+  const organizedData = useOrganizedData(
+    derivativesData,
+    selectedContract,
+    updateIncrementalVolume,
+    updateEatenValues
+  );
 
   // Notify parent component when data updates (single source of truth)
   useEffect(() => {
@@ -116,622 +245,6 @@ function DerivativesDashboard({
       onDataUpdate(derivativesData);
     }
   }, [derivativesData, onDataUpdate]);
-
-  const formatStrikeValue = (value) => {
-    if (value === null || value === undefined || value === '') return '-';
-    const numeric = Number(value);
-    return Number.isFinite(numeric) ? numeric.toLocaleString() : String(value);
-  };
-
-  const organizedData = useMemo(() => {
-    if (!derivativesData) {
-      return {
-        mainTable: [],
-        minusOneTable: [],
-        plusOneTable: [],
-        referencePrice: null,
-        currentStrike: null,
-        desiredPlusStrike: null,
-        desiredMinusStrike: null,
-        futuresPrice: null,
-        currentFuturesContract: null,
-        activeFuturesContract: null,
-        targetExpiry: null
-      };
-    }
-
-    const spotPrice = derivativesData.spotPrice || null;
-    
-    // Dynamic option filtering: Get options for current week (nearest expiry) and futures contract for current month
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    // Determine primary futures contract (current month, no NIFTYNXT)
-    const allFutures = (derivativesData.futures || [])
-      .filter(f => (f.instrumentType || '').toUpperCase() === 'FUT' || (f.tradingsymbol || '').toUpperCase().includes('FUT'))
-      .filter(f => !(f.tradingsymbol || '').toUpperCase().includes('NXT'));
-
-    const futuresWithDates = allFutures
-      .map(f => ({
-        ...f,
-        expiryDateObj: f.expiryDate ? new Date(f.expiryDate) : null
-      }))
-      .map(f => ({
-        ...f,
-        expiryTimestamp: f.expiryDateObj && !isNaN(f.expiryDateObj.getTime()) ? f.expiryDateObj.getTime() : null
-      }))
-      .filter(f => f.expiryTimestamp !== null);
-
-    const sortedFutures = futuresWithDates
-      .sort((a, b) => a.expiryTimestamp - b.expiryTimestamp);
-    
-    const currentFuturesContract = sortedFutures.find(f => f.expiryDateObj >= today) || sortedFutures[0] || null;
-
-    let matchedSelectedFuture = null;
-    if (selectedContract) {
-      matchedSelectedFuture = sortedFutures.find(future => {
-        const tokensMatch = selectedContract.instrumentToken && future.instrumentToken && String(future.instrumentToken) === String(selectedContract.instrumentToken);
-        const symbolsMatch = selectedContract.tradingsymbol && future.tradingsymbol && future.tradingsymbol === selectedContract.tradingsymbol;
-        return tokensMatch || symbolsMatch;
-      }) || null;
-    }
-
-    const activeFuturesContract = matchedSelectedFuture || currentFuturesContract;
-    const futuresPrice = activeFuturesContract?.lastPrice ? Number(activeFuturesContract.lastPrice) : (currentFuturesContract?.lastPrice ? Number(currentFuturesContract.lastPrice) : null);
-
-    // Determine nearest weekly options expiry (closest future date)
-    const allOptionExpiries = [...new Set([
-      ...(derivativesData.callOptions || []).map(call => call.expiryDate),
-      ...(derivativesData.putOptions || []).map(put => put.expiryDate)
-    ])]
-      .map(expiry => ({
-        raw: expiry,
-        date: expiry ? new Date(expiry) : null
-      }))
-      .filter(item => item.date && !isNaN(item.date.getTime()))
-      .sort((a, b) => a.date - b.date);
-
-    const nearestWeeklyExpiry = allOptionExpiries.find(item => {
-      const date = new Date(item.date);
-      date.setHours(0, 0, 0, 0);
-      return date >= today;
-    }) || allOptionExpiries[allOptionExpiries.length - 1] || null;
-
-    let preferredExpiry = null;
-    if (activeFuturesContract?.expiryDateObj) {
-      const targetMonth = activeFuturesContract.expiryDateObj.getMonth();
-      const targetYear = activeFuturesContract.expiryDateObj.getFullYear();
-
-      const sameMonthExpiries = allOptionExpiries.filter(item => {
-        if (!item.date || Number.isNaN(item.date.getTime())) return false;
-        return item.date.getMonth() === targetMonth && item.date.getFullYear() === targetYear;
-      });
-
-      if (sameMonthExpiries.length) {
-        preferredExpiry = sameMonthExpiries.find(item => item.date >= today) || sameMonthExpiries[sameMonthExpiries.length - 1];
-      }
-    }
-
-    const targetExpiry = (preferredExpiry ?? nearestWeeklyExpiry)?.raw ?? null;
-
-    const calls = targetExpiry
-      ? (derivativesData.callOptions || []).filter(call => call.expiryDate === targetExpiry)
-      : (derivativesData.callOptions || []);
-
-    const puts = targetExpiry
-      ? (derivativesData.putOptions || []).filter(put => put.expiryDate === targetExpiry)
-      : (derivativesData.putOptions || []);
-
-    const referencePrice = spotPrice || derivativesData.dailyStrikePrice || futuresPrice || 0;
-
-    // Calculate strikes once for all tables (before defining organizeOptions)
-    const strikeUnit = 50;
-    const allStrikes = [...new Set([
-      ...calls.map(c => c.strikePrice),
-      ...puts.map(p => p.strikePrice)
-    ])].sort((a, b) => a - b);
-
-    const strikeStep = allStrikes.length > 1
-      ? Math.abs(Number(allStrikes[1]) - Number(allStrikes[0])) || strikeUnit
-      : strikeUnit;
-    
-    let currentStrike = allStrikes[0] || 0;
-    if (allStrikes.length > 0 && referencePrice) {
-      currentStrike = allStrikes.reduce((closest, strike) => {
-        return Math.abs(strike - referencePrice) < Math.abs(closest - referencePrice) ? strike : closest;
-      });
-    }
-    
-    const currentStrikeIndex = allStrikes.findIndex(strike => Number(strike) === Number(currentStrike));
-
-    const desiredPlusStrike = currentStrike + strikeUnit;
-    const desiredMinusStrike = currentStrike - strikeUnit;
-
-    const sortedCalls = [...calls].sort((a, b) => a.strikePrice - b.strikePrice);
-    const sortedPuts = [...puts].sort((a, b) => a.strikePrice - b.strikePrice);
-
-    const formatPrice = (value) => {
-      if (value === null || value === undefined || value === '') return '-';
-      const numeric = Number(value);
-      return Number.isFinite(numeric) ? numeric.toFixed(2) : String(value);
-    };
-
-    const formatInteger = (value) => {
-      if (value === null || value === undefined || value === '') return '-';
-      const numeric = Number(value);
-      return Number.isFinite(numeric) ? Math.round(numeric).toLocaleString() : String(value);
-    };
-
-    const selectOption = (options, strikeValue, type, direction = 'closest') => {
-      if (!options.length || strikeValue == null) return null;
-      const filtered = options
-        .filter(opt => (opt.instrumentType || '').toUpperCase() === type && opt.strikePrice != null)
-        .sort((a, b) => Number(a.strikePrice) - Number(b.strikePrice));
-
-      if (!filtered.length) return null;
-
-      const target = Number(strikeValue);
-      const exact = filtered.find(opt => Number(opt.strikePrice) === target);
-      if (exact) return exact;
-
-      if (direction === 'below') {
-        const below = filtered.filter(opt => Number(opt.strikePrice) < target);
-        return below.length ? below[below.length - 1] : filtered[0];
-      }
-
-      if (direction === 'above') {
-        const above = filtered.filter(opt => Number(opt.strikePrice) > target);
-        return above.length ? above[0] : filtered[filtered.length - 1];
-      }
-
-      return filtered.reduce((closest, current) => {
-        if (!closest) return current;
-        const currentDiff = Math.abs(Number(current.strikePrice) - target);
-        const closestDiff = Math.abs(Number(closest.strikePrice) - target);
-        if (currentDiff < closestDiff) return current;
-        if (currentDiff === closestDiff) {
-          const currentVol = Number(current.volume) || 0;
-          const closestVol = Number(closest.volume) || 0;
-          return currentVol >= closestVol ? current : closest;
-        }
-        return closest;
-      }, null);
-    };
-
-    const extractHighLow = (option, sectionType) => {
-      if (!option) return { highs: {}, lows: {} };
-
-      const mapField = (field, candidates) => {
-        for (const key of candidates) {
-          if (option[key] !== undefined && option[key] !== null) {
-            return option[key];
-          }
-        }
-        return null;
-      };
-
-      const highs = {};
-      const lows = {};
-
-      const ltpHigh = mapField('lastPriceHigh', ['highPrice', 'high', 'dayHighPrice']);
-      const ltpLow = mapField('lastPriceLow', ['lowPrice', 'low', 'dayLowPrice']);
-      if (ltpHigh !== null) highs.ltp = ltpHigh;
-      if (ltpLow !== null) lows.ltp = ltpLow;
-
-      const changePctHigh = mapField('changePercentHigh', ['changePercentDayHigh']);
-      const changePctLow = mapField('changePercentLow', ['changePercentDayLow']);
-      if (changePctHigh !== null) highs.changePercent = changePctHigh;
-      if (changePctLow !== null) lows.changePercent = changePctLow;
-
-      const oiHigh = mapField('openInterestDayHigh', ['openInterestDayHigh', 'oiDayHigh']);
-      const oiLow = mapField('openInterestDayLow', ['openInterestDayLow', 'oiDayLow']);
-      if (oiHigh !== null) highs.oi = oiHigh;
-      if (oiLow !== null) lows.oi = oiLow;
-
-      const volHigh = mapField('volumeDayHigh', ['volumeDayHigh']);
-      const volLow = mapField('volumeDayLow', ['volumeDayLow']);
-      if (volHigh !== null) highs.vol = volHigh;
-      if (volLow !== null) lows.vol = volLow;
-
-      const bidHigh = mapField('bestBidPriceDayHigh', ['bestBidPriceDayHigh']);
-      const bidLow = mapField('bestBidPriceDayLow', ['bestBidPriceDayLow']);
-      if (bidHigh !== null) highs.bid = bidHigh;
-      if (bidLow !== null) lows.bid = bidLow;
-
-      const askHigh = mapField('bestAskPriceDayHigh', ['bestAskPriceDayHigh']);
-      const askLow = mapField('bestAskPriceDayLow', ['bestAskPriceDayLow']);
-      if (askHigh !== null) highs.ask = askHigh;
-      if (askLow !== null) lows.ask = askLow;
-
-      const bidQtyHigh = mapField('bestBidQtyDayHigh', ['bestBidQtyDayHigh']);
-      const bidQtyLow = mapField('bestBidQtyDayLow', ['bestBidQtyDayLow']);
-      if (bidQtyHigh !== null) highs.bidQty = bidQtyHigh;
-      if (bidQtyLow !== null) lows.bidQty = bidQtyLow;
-
-      const askQtyHigh = mapField('bestAskQtyDayHigh', ['bestAskQtyDayHigh']);
-      const askQtyLow = mapField('bestAskQtyDayLow', ['bestAskQtyDayLow']);
-      if (askQtyHigh !== null) highs.askQty = askQtyHigh;
-      if (askQtyLow !== null) lows.askQty = askQtyLow;
-
-      return { highs, lows };
-    };
-
-    const buildOptionRow = (option, sectionType, variant = 'default') => {
-      const { highs, lows } = extractHighLow(option, sectionType);
-      const baseBadgeLabel = sectionType === 'calls' ? 'CALL' : 'PUT';
-      const badgeTone = sectionType === 'calls' ? 'call' : 'put';
-      const strikeDisplay = option?.strikePrice != null ? Number(option.strikePrice).toFixed(0) : '-';
-      const tradingsymbol = option?.tradingsymbol || '';
-      const formattedStrike = option?.strikePrice != null ? formatStrikeValue(option.strikePrice) : '-';
-
-      const rawLastPrice = option?.lastPrice != null ? Number(option.lastPrice) : null;
-      const rawChange = option?.change != null ? Number(option.change) : null;
-      const rawChangePercent = option?.changePercent != null ? Number(option.changePercent) : null;
-      const rawOi = option?.openInterest != null ? Number(option.openInterest) : null;
-      const rawVol = option?.volume != null ? Number(option.volume) : null;
-      const rawBid = option?.bid != null ? Number(option.bid) : null;
-      const rawAsk = option?.ask != null ? Number(option.ask) : null;
-      const rawBidQty = option?.bidQuantity != null ? Number(option.bidQuantity) : null;
-      const rawAskQty = option?.askQuantity != null ? Number(option.askQuantity) : null;
-      // Handle eatenDelta, bidEaten, askEaten: Get from backend, but preserve via cache
-      // The cache ensures values don't reset to 0 on every UI refresh
-      const instrumentToken = option?.instrumentToken ? String(option.instrumentToken) : null;
-      const backendEatenDelta = option?.eatenDelta != null && option?.eatenDelta !== undefined 
-        ? Number(option.eatenDelta) 
-        : null;
-      const backendBidEaten = option?.bidEaten != null && option?.bidEaten !== undefined 
-        ? Number(option.bidEaten) 
-        : null;
-      const backendAskEaten = option?.askEaten != null && option?.askEaten !== undefined 
-        ? Number(option.askEaten) 
-        : null;
-      
-      // Update cache with backend values (cache preserves non-zero values, only updates on change)
-      const cachedValues = instrumentToken 
-        ? updateEatenValues(instrumentToken, backendEatenDelta, backendBidEaten, backendAskEaten)
-        : { eatenDelta: backendEatenDelta, bidEaten: backendBidEaten, askEaten: backendAskEaten };
-      
-      // Use cached values (preserved across refreshes)
-      const rawEatenDelta = cachedValues.eatenDelta;
-      const rawBidEaten = cachedValues.bidEaten;
-      const rawAskEaten = cachedValues.askEaten;
- 
-      let segmentLabel;
-      let badgeLabel = baseBadgeLabel;
-
-      switch (variant) {
-        case 'main':
-          segmentLabel = option
-            ? `@ ${strikeDisplay}${tradingsymbol ? ` (${tradingsymbol})` : ''}`
-            : `@ -`;
-          break;
-        case 'contract-only':
-          segmentLabel = tradingsymbol || '-';
-          badgeLabel = null;
-          break;
-        case 'strike-title':
-          segmentLabel = option ? `Strike: ${formattedStrike}` : 'Strike: —';
-          break;
-        default:
-          segmentLabel = option
-            ? `${strikeDisplay}${tradingsymbol ? ` (${tradingsymbol})` : ''}`
-            : '-';
-          break;
-      }
-
-      const contractKey = option
-        ? `${sectionType}:${option.instrumentToken || option.tradingsymbol || segmentLabel}`
-        : null;
-
-      // Calculate incremental volume (cumulative change over 5-minute window)
-      const incrementalVolData = contractKey && rawVol !== null 
-        ? updateIncrementalVolume(contractKey, rawVol)
-        : { incrementalVol: 0, volumeChange: 0, displayValue: '-', rawValue: null };
-
-      let changeDisplay = '';
-      if (option?.change != null) {
-        const formatted = formatPrice(option.change);
-        const numeric = Number(option.change);
-        changeDisplay = numeric > 0 ? `+${formatted}` : formatted;
-      }
-
-      let changePercentDisplay = '';
-      if (option?.changePercent != null) {
-        const formatted = formatPrice(option.changePercent);
-        const numeric = Number(option.changePercent);
-        changePercentDisplay = `${numeric > 0 ? `+${formatted}` : formatted}%`;
-      }
-
-      return {
-        segment: segmentLabel,
-        badgeLabel,
-        ltp: rawLastPrice != null ? formatPrice(rawLastPrice) : '',
-        ltpRaw: rawLastPrice,
-        change: changeDisplay,
-        changeRaw: rawChange,
-        changePercent: changePercentDisplay,
-        changePercentRaw: rawChangePercent,
-        oi: rawOi != null ? formatInteger(rawOi) : '',
-        oiRaw: rawOi,
-        vol: incrementalVolData.displayValue,
-        volRaw: incrementalVolData.rawValue, // For coloring - incremental volume
-        volChange: incrementalVolData.volumeChange, // Change in this refresh
-        originalVol: rawVol, // Original API volume for tooltip
-        bid: rawBid != null ? formatPrice(rawBid) : '',
-        bidRaw: rawBid,
-        ask: rawAsk != null ? formatPrice(rawAsk) : '',
-        askRaw: rawAsk,
-        bidQty: rawBidQty != null ? formatInteger(rawBidQty) : '',
-        bidQtyRaw: rawBidQty,
-        askQty: rawAskQty != null ? formatInteger(rawAskQty) : '',
-        askQtyRaw: rawAskQty,
-        eatenDeltaRaw: rawEatenDelta,
-        eatenDelta: rawEatenDelta != null ? formatInteger(Math.abs(rawEatenDelta)) : '',
-        bidEatenRaw: rawBidEaten,
-        askEatenRaw: rawAskEaten,
-        ltpMovementDirection: option?.ltpMovementDirection || null,
-        ltpMovementConfidence: option?.ltpMovementConfidence != null ? Number(option.ltpMovementConfidence) : null,
-        ltpMovementIntensity: option?.ltpMovementIntensity || null,
-        strikePrice: option?.strikePrice,
-        sectionType,
-        contractKey,
-        instrumentToken: option?.instrumentToken,
-        tradingsymbol: option?.tradingsymbol,
-        highs,
-        lows,
-        badgeTone,
-      };
-    };
-
-    const buildInfoRow = (label, sectionType) => ({
-      segment: label,
-      badgeLabel: null,
-      ltp: '',
-      ltpRaw: null,
-      change: '',
-      changeRaw: null,
-      changePercent: '',
-      changePercentRaw: null,
-      oi: '',
-      oiRaw: null,
-      vol: '',
-      volRaw: null,
-      bid: '',
-      bidRaw: null,
-      ask: '',
-      askRaw: null,
-      bidQty: '',
-      bidQtyRaw: null,
-      askQty: '',
-      askQtyRaw: null,
-      eatenDeltaRaw: null,
-      eatenDelta: '',
-      bidEatenRaw: null,
-      askEatenRaw: null,
-      sectionType,
-      isInfoRow: true,
-    });
-
-    const buildHeaderRow = ({ badgeLabel = null, segment, sectionType, badgeTone = sectionType === 'calls' ? 'call' : sectionType === 'puts' ? 'put' : 'neutral' }) => ({
-      segment,
-      badgeLabel,
-      badgeTone,
-      isHeader: true,
-      ltp: '',
-      ltpRaw: null,
-      change: '',
-      changeRaw: null,
-      changePercent: '',
-      changePercentRaw: null,
-      oi: '',
-      oiRaw: null,
-      vol: '',
-      volRaw: null,
-      bid: '',
-      bidRaw: null,
-      ask: '',
-      askRaw: null,
-      bidQty: '',
-      bidQtyRaw: null,
-      askQty: '',
-      askQtyRaw: null,
-      eatenDeltaRaw: null,
-      eatenDelta: '',
-      bidEatenRaw: null,
-      askEatenRaw: null,
-      sectionType
-    });
-
-    const buildFuturesRow = (future) => {
-      if (!future) return null;
-      const contractKey = future?.instrumentToken || future?.tradingsymbol || null;
-      const rawLastPrice = future?.lastPrice != null ? Number(future.lastPrice) : null;
-      const rawChange = future?.change != null ? Number(future.change) : null;
-      const rawChangePercent = future?.changePercent != null ? Number(future.changePercent) : null;
-      const rawOi = future?.openInterest != null ? Number(future.openInterest) : null;
-      const rawVol = future?.volume != null ? Number(future.volume) : null;
-      const rawBid = future?.bid != null ? Number(future.bid) : null;
-      const rawAsk = future?.ask != null ? Number(future.ask) : null;
-      const rawBidQty = future?.bidQuantity != null ? Number(future.bidQuantity) : null;
-      const rawAskQty = future?.askQuantity != null ? Number(future.askQuantity) : null;
-      // Handle eatenDelta, bidEaten, askEaten: Get from backend, but preserve via cache
-      // The cache ensures values don't reset to 0 on every UI refresh
-      const instrumentToken = future?.instrumentToken ? String(future.instrumentToken) : null;
-      const backendEatenDelta = future?.eatenDelta != null && future?.eatenDelta !== undefined 
-        ? Number(future.eatenDelta) 
-        : null;
-      const backendBidEaten = future?.bidEaten != null && future?.bidEaten !== undefined 
-        ? Number(future.bidEaten) 
-        : null;
-      const backendAskEaten = future?.askEaten != null && future?.askEaten !== undefined 
-        ? Number(future.askEaten) 
-        : null;
-      
-      // Update cache with backend values (cache preserves non-zero values, only updates on change)
-      const cachedValues = instrumentToken 
-        ? updateEatenValues(instrumentToken, backendEatenDelta, backendBidEaten, backendAskEaten)
-        : { eatenDelta: backendEatenDelta, bidEaten: backendBidEaten, askEaten: backendAskEaten };
-      
-      // Use cached values (preserved across refreshes)
-      const rawEatenDelta = cachedValues.eatenDelta;
-      const rawBidEaten = cachedValues.bidEaten;
-      const rawAskEaten = cachedValues.askEaten;
-
-      // Calculate incremental volume (cumulative change over 5-minute window)
-      const incrementalVolData = contractKey && rawVol !== null 
-        ? updateIncrementalVolume(contractKey, rawVol)
-        : { incrementalVol: 0, volumeChange: 0, displayValue: '-', rawValue: null };
-
-      // Format change with +/- symbol for futures
-      let changeDisplay = '';
-      if (rawChange != null) {
-        const formatted = formatPrice(rawChange);
-        const numeric = Number(rawChange);
-        changeDisplay = numeric > 0 ? `+${formatted}` : numeric < 0 ? formatted : `±${formatted}`;
-      }
-
-      return {
-        segment: future.tradingsymbol || 'NIFTY FUT',
-        ltp: rawLastPrice != null ? formatPrice(rawLastPrice) : '',
-        ltpRaw: rawLastPrice,
-        change: changeDisplay,
-        changeRaw: rawChange,
-        changePercent: rawChangePercent != null ? formatPrice(rawChangePercent) : '',
-        changePercentRaw: rawChangePercent,
-        oi: rawOi != null ? formatInteger(rawOi) : '',
-        oiRaw: rawOi,
-        vol: incrementalVolData.displayValue,
-        volRaw: incrementalVolData.rawValue, // For coloring - incremental volume
-        volChange: incrementalVolData.volumeChange, // Change in this refresh
-        originalVol: rawVol, // Original API volume for tooltip
-        bid: rawBid != null ? formatPrice(rawBid) : '',
-        bidRaw: rawBid,
-        ask: rawAsk != null ? formatPrice(rawAsk) : '',
-        askRaw: rawAsk,
-        bidQty: rawBidQty != null ? formatInteger(rawBidQty) : '',
-        bidQtyRaw: rawBidQty,
-        askQty: rawAskQty != null ? formatInteger(rawAskQty) : '',
-        askQtyRaw: rawAskQty,
-        eatenDeltaRaw: rawEatenDelta,
-        eatenDelta: rawEatenDelta != null ? formatInteger(Math.abs(rawEatenDelta)) : '',
-        bidEatenRaw: rawBidEaten,
-        askEatenRaw: rawAskEaten,
-        ltpMovementDirection: future?.ltpMovementDirection || null,
-        ltpMovementConfidence: future?.ltpMovementConfidence != null ? Number(future.ltpMovementConfidence) : null,
-        ltpMovementIntensity: future?.ltpMovementIntensity || null,
-        sectionType: 'futures',
-        instrumentToken: future.instrumentToken,
-        tradingsymbol: future.tradingsymbol,
-        contractKey,
-      };
-    };
-
-    const atmCall = selectOption(sortedCalls, currentStrike, 'CE', 'closest');
-    const atmPut = selectOption(sortedPuts, currentStrike, 'PE', 'closest');
-    const belowCall = selectOption(sortedCalls, desiredMinusStrike, 'CE', 'closest');
-    const belowPut = selectOption(sortedPuts, desiredMinusStrike, 'PE', 'closest');
-    const aboveCall = selectOption(sortedCalls, desiredPlusStrike, 'CE', 'closest');
-    const abovePut = selectOption(sortedPuts, desiredPlusStrike, 'PE', 'closest');
-    const futuresRow = buildFuturesRow(activeFuturesContract);
-
-    const mainRows = [];
-    if (futuresRow) {
-      mainRows.push(futuresRow);
-    }
-    if (atmCall) {
-      mainRows.push(buildOptionRow(atmCall, 'calls', 'main'));
-    } else {
-      mainRows.push(buildInfoRow('No call contract at ATM', 'calls'));
-    }
-    if (atmPut) {
-      mainRows.push(buildOptionRow(atmPut, 'puts', 'main'));
-    } else {
-      mainRows.push(buildInfoRow('No put contract at ATM', 'puts'));
-    }
-
-    const belowRows = [];
-    const belowLabel = desiredMinusStrike != null ? formatStrikeValue(desiredMinusStrike) : 'N/A';
-    // Below spot: Calls are ITM (strike < spot), Puts are OTM (strike < spot)
-    belowRows.push(buildHeaderRow({
-      badgeLabel: 'CALL / ITM',
-      badgeTone: 'call-itm',
-      segment: `Strike: ${belowLabel}`,
-      sectionType: 'calls'
-    }));
-    if (belowCall) {
-      const callRow = buildOptionRow(belowCall, 'calls', 'contract-only');
-      callRow.badgeLabel = 'CALL / ITM';
-      callRow.badgeTone = 'call-itm';
-      belowRows.push(callRow);
-    } else {
-      belowRows.push(buildInfoRow('No call options available at this strike', 'calls'));
-    }
-    belowRows.push(buildHeaderRow({
-      badgeLabel: 'PUT / OTM',
-      badgeTone: 'put-otm',
-      segment: `Strike: ${belowLabel}`,
-      sectionType: 'puts'
-    }));
-    if (belowPut) {
-      const putRow = buildOptionRow(belowPut, 'puts', 'contract-only');
-      putRow.badgeLabel = 'PUT / OTM';
-      putRow.badgeTone = 'put-otm';
-      belowRows.push(putRow);
-    } else {
-      belowRows.push(buildInfoRow('No put options available at this strike', 'puts'));
-    }
-
-    const aboveRows = [];
-    const aboveLabel = desiredPlusStrike != null ? formatStrikeValue(desiredPlusStrike) : 'N/A';
-    // Above spot: Calls are OTM (strike > spot), Puts are ITM (strike > spot)
-    aboveRows.push(buildHeaderRow({
-      badgeLabel: 'CALL / OTM',
-      badgeTone: 'call-otm',
-      segment: `Strike: ${aboveLabel}`,
-      sectionType: 'calls'
-    }));
-    if (aboveCall) {
-      const callRow = buildOptionRow(aboveCall, 'calls', 'contract-only');
-      callRow.badgeLabel = 'CALL / OTM';
-      callRow.badgeTone = 'call-otm';
-      aboveRows.push(callRow);
-    } else {
-      aboveRows.push(buildInfoRow('No call options available at this strike', 'calls'));
-    }
-    aboveRows.push(buildHeaderRow({
-      badgeLabel: 'PUT / ITM',
-      badgeTone: 'put-itm',
-      segment: `Strike: ${aboveLabel}`,
-      sectionType: 'puts'
-    }));
-    if (abovePut) {
-      const putRow = buildOptionRow(abovePut, 'puts', 'contract-only');
-      putRow.badgeLabel = 'PUT / ITM';
-      putRow.badgeTone = 'put-itm';
-      aboveRows.push(putRow);
-    } else {
-      aboveRows.push(buildInfoRow('No put options available at this strike', 'puts'));
-    }
-
-    return {
-      mainTable: mainRows,
-      minusOneTable: belowRows,
-      plusOneTable: aboveRows,
-      referencePrice,
-      currentStrike,
-      desiredPlusStrike,
-      desiredMinusStrike,
-      futuresPrice,
-      currentFuturesContract,
-      activeFuturesContract,
-      targetExpiry,
-      strikeList: allStrikes,
-      atmIndex: currentStrikeIndex,
-      strikeStep,
-      callsForExpiry: sortedCalls,
-      putsForExpiry: sortedPuts
-    };
-  }, [derivativesData, selectedContract]);
 
   const {
     mainTable,
@@ -846,16 +359,6 @@ function DerivativesDashboard({
     const putsList = putsForExpiry || [];
     const rows = [];
 
-    const formatPriceValue = (value) => {
-      if (value === null || value === undefined || Number.isNaN(value)) return '';
-      return Number(value).toFixed(2);
-    };
-
-    const formatIntegerValue = (value) => {
-      if (value === null || value === undefined || Number.isNaN(value)) return '';
-      return Number(value).toLocaleString();
-    };
-
     const dynamicOptionRow = (option, sectionType) => {
       if (!option) return null;
 
@@ -897,8 +400,8 @@ function DerivativesDashboard({
         ? updateIncrementalVolume(`${sectionType}:${contractKey}`, rawVol)
         : { incrementalVol: 0, volumeChange: 0, displayValue: '-', rawValue: null };
 
-      const formattedChange = rawChange != null ? `${rawChange > 0 ? '+' : ''}${formatPriceValue(rawChange)}` : '';
-      const formattedPercent = rawChangePercent != null ? `${rawChangePercent > 0 ? '+' : ''}${Number(rawChangePercent).toFixed(2)}%` : '';
+      const formattedChange = rawChange != null ? formatChange(rawChange) : '';
+      const formattedPercent = rawChangePercent != null ? formatChangePercent(rawChangePercent) : '';
 
       return {
         segment: option.tradingsymbol || '-',
@@ -909,28 +412,28 @@ function DerivativesDashboard({
         instrumentToken: option?.instrumentToken,
         tradingsymbol: option?.tradingsymbol,
         strikePrice: option?.strikePrice,
-        ltp: rawLastPrice != null ? formatPriceValue(rawLastPrice) : '',
+        ltp: formatPrice(rawLastPrice),
         ltpRaw: rawLastPrice,
         change: formattedChange,
         changeRaw: rawChange,
         changePercent: formattedPercent,
         changePercentRaw: rawChangePercent,
-        oi: rawOi != null ? formatIntegerValue(rawOi) : '',
+        oi: formatInteger(rawOi),
         oiRaw: rawOi,
         vol: incrementalVolData.displayValue,
         volRaw: incrementalVolData.rawValue, // For coloring - incremental volume
         volChange: incrementalVolData.volumeChange, // Change in this refresh
         originalVol: rawVol, // Original API volume for tooltip
-        bid: rawBid != null ? formatPriceValue(rawBid) : '',
+        bid: formatPrice(rawBid),
         bidRaw: rawBid,
-        ask: rawAsk != null ? formatPriceValue(rawAsk) : '',
+        ask: formatPrice(rawAsk),
         askRaw: rawAsk,
-        bidQty: rawBidQty != null ? formatIntegerValue(rawBidQty) : '',
+        bidQty: formatInteger(rawBidQty),
         bidQtyRaw: rawBidQty,
-        askQty: rawAskQty != null ? formatIntegerValue(rawAskQty) : '',
+        askQty: formatInteger(rawAskQty),
         askQtyRaw: rawAskQty,
         eatenDeltaRaw: rawEatenDelta,
-        eatenDelta: rawEatenDelta != null ? formatIntegerValue(Math.abs(rawEatenDelta)) : '',
+        eatenDelta: rawEatenDelta != null ? formatInteger(Math.abs(rawEatenDelta)) : '',
         bidEatenRaw: rawBidEaten,
         askEatenRaw: rawAskEaten,
         highs: {},

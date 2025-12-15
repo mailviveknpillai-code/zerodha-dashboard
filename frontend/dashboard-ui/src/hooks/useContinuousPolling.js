@@ -9,6 +9,7 @@ export default function useContinuousPolling(asyncTask, intervalMs, deps = []) {
   const asyncTaskRef = useRef(asyncTask)
   const lastIntervalMsRef = useRef(intervalMs)
   const effectIdRef = useRef(0) // Track effect instances to prevent stale closures
+  const scheduledTimeRef = useRef(null) // Track scheduled time for exact interval maintenance
 
   // Always keep refs up to date
   useEffect(() => {
@@ -38,7 +39,7 @@ export default function useContinuousPolling(asyncTask, intervalMs, deps = []) {
       clearTimeout(timerRef.current)
       timerRef.current = null
     }
-
+    
     const invoke = async () => {
       // Check if this effect instance is still active
       // This is expected when the interval changes - the old effect should not start new requests
@@ -51,8 +52,10 @@ export default function useContinuousPolling(asyncTask, intervalMs, deps = []) {
         return
       }
       
-      // Record the start time to measure actual interval
-      const requestStartTime = Date.now()
+      // Record the scheduled time (when this poll was supposed to run)
+      const scheduledTime = scheduledTimeRef.current || Date.now()
+      const actualStartTime = Date.now()
+      const drift = actualStartTime - scheduledTime
       
       // Set inFlightRef - this is safe even if there's an old request
       // because useLatestDerivativesFeed has its own in-flight protection
@@ -72,13 +75,26 @@ export default function useContinuousPolling(asyncTask, intervalMs, deps = []) {
         }
         
         // Schedule next poll using the exact interval from ref
-        // Calculate delay to maintain exact interval from request start time
+        // CRITICAL: Calculate next scheduled time based on the scheduled time (not actual start time)
+        // This maintains exact intervals even if requests take longer than expected
         if (activeRef.current) {
           const nextInterval = intervalMsRef.current
-          const requestDuration = Date.now() - requestStartTime
-          const delayUntilNext = Math.max(0, nextInterval - requestDuration)
           
-          logger.debug(`[useContinuousPolling] Request took ${requestDuration}ms, scheduling next poll in ${delayUntilNext}ms (total interval: ${nextInterval}ms)`)
+          // Calculate next scheduled time: start from the scheduled time (not actual start) + interval
+          // This compensates for drift and maintains exact intervals
+          const nextScheduledTime = scheduledTime + nextInterval
+          const now = Date.now()
+          const delayUntilNext = Math.max(0, nextScheduledTime - now)
+          
+          // Update scheduled time ref for next iteration
+          scheduledTimeRef.current = nextScheduledTime
+          
+          if (drift > 10) {
+            logger.debug(`[useContinuousPolling] Drift detected: ${drift}ms, compensating. Next poll in ${delayUntilNext}ms (interval: ${nextInterval}ms)`)
+          } else {
+            logger.debug(`[useContinuousPolling] Scheduling next poll in ${delayUntilNext}ms (interval: ${nextInterval}ms)`)
+          }
+          
           timerRef.current = setTimeout(invoke, delayUntilNext)
         }
       }
@@ -95,12 +111,16 @@ export default function useContinuousPolling(asyncTask, intervalMs, deps = []) {
         return
       }
       
+      // Initialize scheduled time for exact interval tracking
+      scheduledTimeRef.current = Date.now()
+      
       // Start polling immediately
       // If there's an in-flight request from the old effect, wait briefly (50ms) then start
       // useLatestDerivativesFeed will handle preventing duplicate requests
       // This ensures the new interval takes effect promptly
       if (inFlightRef.current) {
         // Wait briefly for old request to potentially finish
+        scheduledTimeRef.current = Date.now() + 50
         timerRef.current = setTimeout(() => {
           if (effectIdRef.current === currentEffectId && activeRef.current) {
             invoke()

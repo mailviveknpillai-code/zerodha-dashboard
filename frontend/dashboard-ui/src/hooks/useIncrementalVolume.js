@@ -1,4 +1,5 @@
 import { useRef, useMemo } from 'react';
+import logger from '../utils/logger';
 
 /**
  * Hook to track incremental volume changes over rolling time windows
@@ -31,7 +32,8 @@ export function useIncrementalVolume(contractKey, currentVolume, windowMs = 5 * 
     let volumeChange = 0;
     if (contractHistory.previousVol !== null && contractHistory.previousVol !== undefined) {
       const change = currentVolume - contractHistory.previousVol;
-      // Only add positive changes (volume can only increase or stay same)
+      // Handle volume changes: positive changes are added, negative changes reset the counter
+      // Volume can decrease (e.g., on contract expiry, data correction, or market reset)
       if (change > 0) {
         volumeChange = change;
         // Add this change to history
@@ -39,7 +41,14 @@ export function useIncrementalVolume(contractKey, currentVolume, windowMs = 5 * 
           timestamp: now,
           change: volumeChange
         });
+      } else if (change < 0) {
+        // Volume decreased - reset history to prevent incorrect cumulative values
+        // This handles cases like contract expiry or data corrections
+        contractHistory.changes = [];
+        contractHistory.cumulativeChange = 0;
+        log.warn(`Volume decreased for ${contractKey}: ${contractHistory.previousVol} -> ${currentVolume}. Resetting history.`);
       }
+      // If change === 0, no action needed
     }
 
     // Update previous volume
@@ -120,12 +129,19 @@ export function useIncrementalVolumeMap(windowMs = 5 * 60 * 1000) {
     let volumeChange = 0;
     if (contractHistory.previousVol !== null && contractHistory.previousVol !== undefined) {
       const change = currentVolume - contractHistory.previousVol;
-      // Only add positive changes (volume can only increase or stay same)
+      // Handle volume changes: positive changes are added, negative changes reset the counter
+      // Volume can decrease (e.g., on contract expiry, data correction, or market reset)
       if (change > 0) {
         volumeChange = change;
         // Add to cumulative change for this interval
         contractHistory.cumulativeChange += volumeChange;
+      } else if (change < 0) {
+        // Volume decreased - reset cumulative change to prevent incorrect values
+        // This handles cases like contract expiry or data corrections
+        contractHistory.cumulativeChange = 0;
+        // Note: We don't log here to avoid console spam, but the reset ensures correctness
       }
+      // If change === 0, no action needed
     }
 
     // Update previous volume

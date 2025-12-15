@@ -16,6 +16,7 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.net.URI;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -88,7 +89,8 @@ public class ZerodhaAuthController {
         }
         
         try {
-            log.info("Request token received successfully: {}", requestToken.substring(0, Math.min(10, requestToken.length())) + "...");
+            // Security: Don't log token values, even partially
+            log.info("Request token received successfully (length: {})", requestToken.length());
             
             // Exchange request_token for access_token using Kite API
             Map<String, Object> tokenExchangeResult = exchangeRequestTokenForAccessToken(requestToken);
@@ -155,7 +157,7 @@ public class ZerodhaAuthController {
                     checksumInput.length(), apiKey.length(), requestToken.length());
             
             // Prepare POST request
-            URL url = new URL("https://api.kite.trade/session/token");
+            URL url = URI.create("https://api.kite.trade/session/token").toURL();
             HttpURLConnection connection = (HttpURLConnection) url.openConnection();
             connection.setRequestMethod("POST");
             connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
@@ -167,9 +169,9 @@ public class ZerodhaAuthController {
                              "&request_token=" + URLEncoder.encode(requestToken, StandardCharsets.UTF_8) +
                              "&checksum=" + checksum.toString();
             
-            log.debug("Token exchange request - API Key: {}, Request Token: {}..., Checksum: {}...", 
-                    apiKey, requestToken.substring(0, Math.min(10, requestToken.length())), 
-                    checksum.toString().substring(0, Math.min(10, checksum.length())));
+            // Security: Don't log sensitive values
+            log.debug("Token exchange request - API Key length: {}, Request Token length: {}, Checksum calculated", 
+                    apiKey.length(), requestToken.length());
             
             // Send request
             try (OutputStream os = connection.getOutputStream()) {
@@ -355,16 +357,53 @@ public class ZerodhaAuthController {
     }
 
     private String resolveCallbackUri() {
+        String resolvedUri;
         if (StringUtils.hasText(redirectUri)) {
-            return redirectUri;
-        }
-
-        if (StringUtils.hasText(publicTunnelUrl)) {
+            resolvedUri = redirectUri;
+        } else if (StringUtils.hasText(publicTunnelUrl)) {
             String base = publicTunnelUrl.endsWith("/") ? publicTunnelUrl.substring(0, publicTunnelUrl.length() - 1) : publicTunnelUrl;
-            return base + "/api/zerodha/callback";
+            resolvedUri = base + "/api/zerodha/callback";
+        } else {
+            resolvedUri = "http://localhost:9000/api/zerodha/callback";
         }
-
-        return "http://localhost:9000/api/zerodha/callback";
+        
+        // Security: Validate redirect URI to prevent redirect attacks
+        if (!isValidRedirectUri(resolvedUri)) {
+            log.warn("Invalid redirect URI detected: {}, using default", resolvedUri);
+            return "http://localhost:9000/api/zerodha/callback";
+        }
+        
+        return resolvedUri;
+    }
+    
+    /**
+     * Validate redirect URI to prevent redirect attacks.
+     * Only allow HTTPS or localhost URIs.
+     */
+    private boolean isValidRedirectUri(String uri) {
+        if (uri == null || uri.isEmpty()) {
+            return false;
+        }
+        
+        try {
+            URI parsedUri = URI.create(uri);
+            String scheme = parsedUri.getScheme();
+            String host = parsedUri.getHost();
+            
+            // Only allow HTTPS or localhost HTTP
+            if (!"https".equalsIgnoreCase(scheme) && 
+                !("http".equalsIgnoreCase(scheme) && 
+                  (host == null || host.equals("localhost") || host.equals("127.0.0.1")))) {
+                return false;
+            }
+            
+            // Must end with /api/zerodha/callback
+            String path = parsedUri.getPath();
+            return path != null && path.endsWith("/api/zerodha/callback");
+        } catch (Exception e) {
+            log.warn("Failed to validate redirect URI: {}", uri, e);
+            return false;
+        }
     }
 
     private ResponseEntity<?> redirectToClient(String path) {

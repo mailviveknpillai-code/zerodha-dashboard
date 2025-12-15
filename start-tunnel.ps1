@@ -1,22 +1,25 @@
-# Quick Cloudflare Tunnel Setup
-Write-Host "Starting Cloudflare tunnel to frontend (port 5173)..." -ForegroundColor Cyan
-Write-Host ""
+# Start Cloudflare Tunnel
+# This script starts a Cloudflare tunnel to expose the local application
 
-# Check if frontend is accessible
-try {
-    $response = Invoke-WebRequest -Uri "http://localhost:5173" -Method GET -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
-    Write-Host "✓ Frontend is running on port 5173" -ForegroundColor Green
-} catch {
-    Write-Host "⚠ Frontend might not be ready yet, but continuing..." -ForegroundColor Yellow
+param(
+    [string]$Url = "http://localhost:9000",
+    [string]$Protocol = "http"
+)
+
+Write-Host "Starting Cloudflare tunnel..." -ForegroundColor Green
+Write-Host "Target URL: $Url" -ForegroundColor Yellow
+
+# Check if cloudflared.exe exists
+if (-not (Test-Path "cloudflared.exe")) {
+    Write-Host "ERROR: cloudflared.exe not found!" -ForegroundColor Red
+    Write-Host "Please download cloudflared from: https://github.com/cloudflare/cloudflared/releases" -ForegroundColor Yellow
+    exit 1
 }
 
-Write-Host ""
-Write-Host "Starting tunnel... This will generate a random URL." -ForegroundColor Yellow
-Write-Host "The frontend will proxy API calls to the backend automatically." -ForegroundColor Yellow
-Write-Host "Press Ctrl+C to stop" -ForegroundColor Yellow
-Write-Host ""
+# Start tunnel
+Write-Host "`nTunnel starting... The URL will be displayed below." -ForegroundColor Cyan
+Write-Host "Copy the URL and update PUBLIC_TUNNEL_URL in docker-compose.yml or .env file`n" -ForegroundColor Yellow
 
-# Start cloudflared tunnel pointing to frontend
-# Use 127.0.0.1 instead of localhost to force IPv4 (cloudflared has issues with IPv6)
-& .\cloudflared.exe tunnel --url http://127.0.0.1:5173
+& .\cloudflared.exe tunnel --url $Url
+
 

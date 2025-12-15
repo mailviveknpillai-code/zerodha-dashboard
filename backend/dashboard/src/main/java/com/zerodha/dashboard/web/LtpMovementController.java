@@ -1,10 +1,14 @@
 package com.zerodha.dashboard.web;
 
 import com.zerodha.dashboard.service.LtpMovementService;
+import com.zerodha.dashboard.service.WindowManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * REST controller for LTP Movement configuration.
@@ -16,10 +20,15 @@ public class LtpMovementController {
     
     private static final Logger log = LoggerFactory.getLogger(LtpMovementController.class);
     
-    private final LtpMovementService ltpMovementService;
+    private static final String FEATURE_NAME = "ltpMovement";
+    private static final String SYMBOL = "NIFTY"; // Representative symbol for window size updates
     
-    public LtpMovementController(LtpMovementService ltpMovementService) {
+    private final LtpMovementService ltpMovementService;
+    private final WindowManager windowManager;
+    
+    public LtpMovementController(LtpMovementService ltpMovementService, WindowManager windowManager) {
         this.ltpMovementService = ltpMovementService;
+        this.windowManager = windowManager;
     }
     
     /**
@@ -57,6 +66,52 @@ public class LtpMovementController {
         
         log.info("updateCacheSize: Updated LTP movement cache size from {} to {}", oldSize, updatedSize);
         return ResponseEntity.ok(updatedSize);
+    }
+    
+    /**
+     * Get the current window size in seconds.
+     * 
+     * @return Current window size
+     */
+    @GetMapping("/window")
+    public ResponseEntity<Map<String, Integer>> getWindow() {
+        int windowSeconds = ltpMovementService.getWindowSeconds();
+        Map<String, Integer> response = new HashMap<>();
+        response.put("windowSeconds", windowSeconds);
+        log.debug("getWindow: Returning current window size: {}s", windowSeconds);
+        return ResponseEntity.ok(response);
+    }
+    
+    /**
+     * Update the window size in seconds.
+     * 
+     * @param seconds Window size in seconds (must be positive)
+     * @return Updated window size
+     */
+    @PostMapping(value = "/window", consumes = {"*/*"})
+    public ResponseEntity<Map<String, Object>> updateWindow(@RequestParam(required = false) Integer seconds) {
+        int oldWindowSeconds = ltpMovementService.getWindowSeconds();
+        
+        if (seconds == null || seconds <= 0) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("error", "Invalid window size. Must be a positive integer.");
+            return ResponseEntity.badRequest().body(error);
+        }
+        
+        ltpMovementService.setWindowSeconds(seconds);
+        
+        // CRITICAL: Synchronize with WindowManager to ensure window boundaries are aligned
+        // Get normalized window size from service (it normalizes to supported values)
+        int normalizedWindowSeconds = ltpMovementService.getWindowSeconds();
+        windowManager.updateWindowSize(FEATURE_NAME, SYMBOL, normalizedWindowSeconds);
+        
+        Map<String, Object> response = new HashMap<>();
+        response.put("windowSeconds", normalizedWindowSeconds);
+        response.put("previousWindowSeconds", oldWindowSeconds);
+        
+        log.info("LTP movement window updated: {}s -> {}s (normalized: {}s). Synchronized with WindowManager.", 
+            oldWindowSeconds, seconds, normalizedWindowSeconds);
+        return ResponseEntity.ok(response);
     }
 }
 

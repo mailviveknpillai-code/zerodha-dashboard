@@ -73,11 +73,11 @@ export default function FuturesTable({
     const isMainTableRow = typeof key === 'string' && key.startsWith('main-');
     const isMainTableContractRow = isMainTableRow && key.includes('main-') && !key.includes('section');
     // Check if this is a contract row by checking the row data when rendering
-    return 'px-2 sm:px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis';
+    return 'px-2 sm:px-4 text-center whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis';
   };
   
   const numericCellBase =
-    'py-4 sm:py-5 px-2 sm:px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis';
+    'py-4 sm:py-5 px-2 sm:px-4 text-center whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis';
   const cardBase = isDarkMode ? 'bg-slate-800 border-slate-600 text-slate-200' : 'bg-white border-gray-200 text-gray-900';
   const headerTitleColor = isDarkMode ? 'text-slate-200' : 'text-gray-900';
   const headerSubtitleColor = isDarkMode ? 'text-slate-300' : 'text-gray-600';
@@ -286,14 +286,14 @@ export default function FuturesTable({
         {isStaticRow ? (
           <DataCell
             value={null}
-            className={`${mainTableNumericPadding} px-2 sm:px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis`}
+            className={`${mainTableNumericPadding} px-2 sm:px-4 text-center whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis`}
             displayValue={row.ltp}
             coloringMeta={null}
           />
         ) : (
           <LTPCell
             value={row.ltpRaw ?? null}
-            className={`${mainTableNumericPadding} px-2 sm:px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell text-xs sm:text-sm ${isStaticRow ? '' : 'font-semibold'}`}
+            className={`${mainTableNumericPadding} px-2 sm:px-4 text-center whitespace-nowrap tabular-nums font-mono data-cell text-xs sm:text-sm ${isStaticRow ? '' : 'font-semibold'}`}
             displayValue={row.ltp}
             coloringMeta={makeColorMeta('ltp')}
             ltpMovementDirection={row.ltpMovementDirection}
@@ -303,7 +303,7 @@ export default function FuturesTable({
         )}
         <DataCell
           value={isStaticRow ? null : (row.oiRaw ?? null)}
-          className={`${mainTableNumericPadding} px-2 sm:px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis ${isStaticRow ? '' : 'font-semibold'}`}
+          className={`${mainTableNumericPadding} px-2 sm:px-4 text-center whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis ${isStaticRow ? '' : 'font-semibold'}`}
           displayValue={row.oi}
           coloringMeta={makeColorMeta('oi')}
         />
@@ -325,7 +325,7 @@ export default function FuturesTable({
           return (
             <DataCell
               value={isStaticRow ? null : (row.oiRaw ?? null)}
-              className={`${mainTableNumericPadding} px-2 sm:px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis`}
+              className={`${mainTableNumericPadding} px-2 sm:px-4 text-center whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis`}
               displayValue={deltaOiDisplay}
               coloringMeta={!isStaticRow && row.contractKey ? makeColorMeta('oi') : null}
             />
@@ -333,20 +333,20 @@ export default function FuturesTable({
         })()}
         <DataCell
           value={isStaticRow ? null : (row.volRaw ?? null)}
-          className={`${mainTableNumericPadding} px-2 sm:px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis ${isStaticRow ? '' : 'font-semibold'}`}
+          className={`${mainTableNumericPadding} px-2 sm:px-4 text-center whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis ${isStaticRow ? '' : 'font-semibold'}`}
           displayValue={row.vol}
           coloringMeta={makeColorMeta('vol')}
           title={!isStaticRow && row.originalVol != null ? `API Volume: ${Number(row.originalVol).toLocaleString()}` : null}
         />
         <DataCell
           value={isStaticRow ? null : (row.bidRaw ?? null)}
-          className={`${mainTableNumericPadding} px-2 sm:px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis ${isStaticRow ? '' : 'font-semibold'}`}
+          className={`${mainTableNumericPadding} px-2 sm:px-4 text-center whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis ${isStaticRow ? '' : 'font-semibold'}`}
           displayValue={row.bid}
           coloringMeta={makeColorMeta('bid')}
         />
         <DataCell
           value={isStaticRow ? null : (row.askRaw ?? null)}
-          className={`${mainTableNumericPadding} px-2 sm:px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis ${isStaticRow ? '' : 'font-semibold'}`}
+          className={`${mainTableNumericPadding} px-2 sm:px-4 text-center whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis ${isStaticRow ? '' : 'font-semibold'}`}
           displayValue={row.ask}
           coloringMeta={makeColorMeta('ask')}
         />
@@ -354,7 +354,7 @@ export default function FuturesTable({
           bidQtyValue={isStaticRow ? null : (row.bidQtyRaw ?? null)}
           bidQtyDisplay={row.bidQty}
           bidEatenValue={isStaticRow ? null : (row.bidEatenRaw ?? null)}
-          className={`${mainTableNumericPadding} px-2 sm:px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis ${isStaticRow ? '' : 'font-semibold'}`}
+          className={`${mainTableNumericPadding} px-2 sm:px-4 text-center whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis ${isStaticRow ? '' : 'font-semibold'}`}
           coloringMeta={makeColorMeta('bidQty')}
           title="Bid Quantity (updates at UI refresh rate). Bubble shows Bid Eaten (uses eaten delta window interval)"
         />
@@ -388,7 +388,7 @@ export default function FuturesTable({
           askQtyValue={isStaticRow ? null : (row.askQtyRaw ?? null)}
           askQtyDisplay={row.askQty}
           askEatenValue={isStaticRow ? null : (row.askEatenRaw ?? null)}
-          className={`${mainTableNumericPadding} px-2 sm:px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis ${isStaticRow ? '' : 'font-semibold'}`}
+          className={`${mainTableNumericPadding} px-2 sm:px-4 text-center whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis ${isStaticRow ? '' : 'font-semibold'}`}
           coloringMeta={makeColorMeta('askQty')}
           title="Ask Quantity (updates at UI refresh rate). Bubble shows Ask Eaten (uses eaten delta window interval)"
         />
@@ -622,21 +622,21 @@ export default function FuturesTable({
         >
           <tr>
             <th className="text-left px-3 sm:px-4 py-3">Segment</th>
-            <th className="px-3 sm:px-4 py-3 text-right">LTP</th>
-            <th className="px-3 sm:px-4 py-3 text-right">OI</th>
-            <th className="px-3 sm:px-4 py-3 text-right">Δ OI</th>
-            <th className="px-3 sm:px-4 py-3 text-right">Vol</th>
-            <th className="px-3 sm:px-4 py-3 text-right">Bid</th>
-            <th className="px-3 sm:px-4 py-3 text-right">Ask</th>
-            <th className="px-3 sm:px-4 py-3 text-right">Bid Qty</th>
+            <th className="px-3 sm:px-4 py-3 text-center">LTP</th>
+            <th className="px-3 sm:px-4 py-3 text-center">OI</th>
+            <th className="px-3 sm:px-4 py-3 text-center">Δ OI</th>
+            <th className="px-3 sm:px-4 py-3 text-center">Vol</th>
+            <th className="px-3 sm:px-4 py-3 text-center">Bid</th>
+            <th className="px-3 sm:px-4 py-3 text-center">Ask</th>
+            <th className="px-3 sm:px-4 py-3 text-center">Bid Qty</th>
             <th 
-              className="px-3 sm:px-4 py-3 text-right" 
+              className="px-3 sm:px-4 py-3 text-center" 
               title="Bid Qty - Ask Qty. Bubble shows Eaten Δ (Ask Eaten - Bid Eaten over rolling window)"
             >
               ΔB/A QTY
             </th>
-            <th className="px-3 sm:px-4 py-3 text-right">Ask Qty</th>
-            <th className="px-3 sm:px-4 py-3 text-right">Δ Price</th>
+            <th className="px-3 sm:px-4 py-3 text-center">Ask Qty</th>
+            <th className="px-3 sm:px-4 py-3 text-center">Δ Price</th>
           </tr>
         </thead>
         <tbody>
@@ -831,21 +831,21 @@ export default function FuturesTable({
               >
                 <tr>
                   <th className={`text-left border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}>Segment</th>
-                  <th className={`text-right border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}>LTP</th>
-                  <th className={`text-right border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}>OI</th>
-                  <th className={`text-right border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}>Δ OI</th>
-                  <th className={`text-right border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}>Vol</th>
-                  <th className={`text-right border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}>Bid</th>
-                  <th className={`text-right border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}>Ask</th>
-                  <th className={`text-right border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}>Bid Qty</th>
+                  <th className={`text-center border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}>LTP</th>
+                  <th className={`text-center border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}>OI</th>
+                  <th className={`text-center border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}>Δ OI</th>
+                  <th className={`text-center border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}>Vol</th>
+                  <th className={`text-center border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}>Bid</th>
+                  <th className={`text-center border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}>Ask</th>
+                  <th className={`text-center border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}>Bid Qty</th>
                   <th 
-                    className={`text-right border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}
+                    className={`text-center border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}
                     title="Bid Qty - Ask Qty. Bubble shows Eaten Δ (Ask Eaten - Bid Eaten over rolling window)"
                   >
                     ΔB/A QTY
                   </th>
-                  <th className={`text-right border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}>Ask Qty</th>
-                  <th className="text-right">Δ Price</th>
+                  <th className={`text-center border-r ${isDarkMode ? 'border-slate-600' : 'border-slate-200'}`}>Ask Qty</th>
+                  <th className="text-center">Δ Price</th>
                 </tr>
               </thead>
               <tbody className={isDarkMode ? 'bg-slate-900' : 'bg-white'}>

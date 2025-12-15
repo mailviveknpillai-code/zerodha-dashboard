@@ -64,11 +64,9 @@
                 <version>0.8.12</version>
                 <configuration>
                     <excludes>
-                        <exclude>com/zerodha/dashboard/adapter/BreezeApiAdapter.class</exclude>
                         <exclude>com/zerodha/dashboard/adapter/ZerodhaApiAdapter.class</exclude>
                         <exclude>com/zerodha/dashboard/service/RedisServiceImpl.class</exclude>
                         <exclude>com/zerodha/dashboard/web/RealDerivativesController.class</exclude>
-                        <exclude>com/zerodha/dashboard/web/BreezeAuthController.class</exclude>
                         <exclude>com/zerodha/dashboard/web/ZerodhaAuthController.class</exclude>
                         <exclude>com/zerodha/dashboard/web/StrikePriceMonitoringController.class</exclude>
                         <exclude>com/zerodha/dashboard/ZerodhaDashboardApplication.class</exclude>

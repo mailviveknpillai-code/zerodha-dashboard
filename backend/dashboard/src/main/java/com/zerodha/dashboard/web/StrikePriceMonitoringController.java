@@ -1,6 +1,5 @@
 package com.zerodha.dashboard.web;
 
-import com.zerodha.dashboard.adapter.BreezeApiAdapter;
 import com.zerodha.dashboard.adapter.ZerodhaApiAdapter;
 import com.zerodha.dashboard.model.DerivativesChain;
 import com.zerodha.dashboard.model.DerivativeContract;
@@ -39,18 +38,12 @@ public class StrikePriceMonitoringController {
 
     private static final Logger log = LoggerFactory.getLogger(StrikePriceMonitoringController.class);
 
-    private final BreezeApiAdapter breezeApiAdapter;
     private final ZerodhaApiAdapter zerodhaApiAdapter;
-
-    @Value("${breeze.api.enabled:true}")
-    private boolean breezeApiEnabled;
 
     @Value("${zerodha.enabled:false}")
     private boolean zerodhaEnabled;
 
-    public StrikePriceMonitoringController(BreezeApiAdapter breezeApiAdapter,
-                                           ZerodhaApiAdapter zerodhaApiAdapter) {
-        this.breezeApiAdapter = breezeApiAdapter;
+    public StrikePriceMonitoringController(ZerodhaApiAdapter zerodhaApiAdapter) {
         this.zerodhaApiAdapter = zerodhaApiAdapter;
     }
     
@@ -168,16 +161,10 @@ public class StrikePriceMonitoringController {
     }
 
     private Optional<DerivativesChain> loadChain(String normalizedUnderlying) {
-        Optional<DerivativesChain> chainOpt = Optional.empty();
-
-        if (breezeApiEnabled) {
-            chainOpt = breezeApiAdapter.getDerivativesChain(normalizedUnderlying);
+        if (zerodhaEnabled) {
+            return zerodhaApiAdapter.getDerivativesChain(normalizedUnderlying);
         }
-        
-        if (chainOpt.isEmpty() && zerodhaEnabled) {
-            chainOpt = zerodhaApiAdapter.getDerivativesChain(normalizedUnderlying);
-        }
-        return chainOpt;
+        return Optional.empty();
     }
 
     private String sanitizeUnderlying(String rawUnderlying) {

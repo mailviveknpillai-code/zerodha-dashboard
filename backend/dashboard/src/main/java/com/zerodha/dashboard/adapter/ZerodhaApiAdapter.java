@@ -18,13 +18,22 @@ import java.io.InputStreamReader;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.net.HttpURLConnection;
+import java.net.URI;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
@@ -284,7 +293,7 @@ public class ZerodhaApiAdapter {
                 fullUrl += "?" + queryParams;
             }
             
-            URL url = new URL(fullUrl);
+            URL url = URI.create(fullUrl).toURL();
             HttpURLConnection connection = (HttpURLConnection) url.openConnection();
             
             // Set headers for Zerodha Kite API
@@ -650,9 +659,7 @@ public class ZerodhaApiAdapter {
             
             // Try to find any entry in data (fallback - iterate through all keys)
             if (dataNode.isObject() && dataNode.size() > 0) {
-                Iterator<Map.Entry<String, JsonNode>> fields = dataNode.fields();
-                while (fields.hasNext()) {
-                    Map.Entry<String, JsonNode> entry = fields.next();
+                for (Map.Entry<String, JsonNode> entry : dataNode.properties()) {
                     JsonNode underlyingData = entry.getValue();
                     JsonNode lastPriceNode = underlyingData.path("last_price");
                     if (!lastPriceNode.isMissingNode()) {
@@ -715,7 +722,7 @@ public class ZerodhaApiAdapter {
             }
             
             // Parse each quote
-            dataNode.fields().forEachRemaining(entry -> {
+            dataNode.properties().forEach(entry -> {
                 String symbolKey = entry.getKey(); // e.g., "NFO:NIFTY25NOV25000CE"
                 JsonNode quoteData = entry.getValue();
                 
@@ -815,6 +822,9 @@ public class ZerodhaApiAdapter {
                             BigDecimal changePercent = change.divide(contract.getClose(), 4, RoundingMode.HALF_UP)
                                 .multiply(BigDecimal.valueOf(100));
                             contract.setChangePercent(changePercent);
+                        } else {
+                            // If close is zero, set changePercent to zero instead of leaving it null
+                            contract.setChangePercent(BigDecimal.ZERO);
                         }
                     }
                     
@@ -856,7 +866,7 @@ public class ZerodhaApiAdapter {
             }
             
             // Parse each quote
-            dataNode.fields().forEachRemaining(entry -> {
+            dataNode.properties().forEach(entry -> {
                 String symbolKey = entry.getKey(); // e.g., "NFO:NIFTY25NOVFUT"
                 JsonNode quoteData = entry.getValue();
                 
@@ -956,6 +966,9 @@ public class ZerodhaApiAdapter {
                             BigDecimal changePercent = change.divide(contract.getClose(), 4, RoundingMode.HALF_UP)
                                 .multiply(BigDecimal.valueOf(100));
                             contract.setChangePercent(changePercent);
+                        } else {
+                            // If close is zero, set changePercent to zero instead of leaving it null
+                            contract.setChangePercent(BigDecimal.ZERO);
                         }
                     }
                     

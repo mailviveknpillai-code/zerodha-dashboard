@@ -1,6 +1,7 @@
 package com.zerodha.dashboard.web;
 
 import com.zerodha.dashboard.service.EatenDeltaService;
+import com.zerodha.dashboard.service.WindowManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -19,10 +20,15 @@ public class EatenDeltaController {
 
     private static final Logger log = LoggerFactory.getLogger(EatenDeltaController.class);
     
-    private final EatenDeltaService eatenDeltaService;
+    private static final String FEATURE_NAME = "bidAskEaten";
+    private static final String SYMBOL = "NIFTY"; // Representative symbol for window size updates
     
-    public EatenDeltaController(EatenDeltaService eatenDeltaService) {
+    private final EatenDeltaService eatenDeltaService;
+    private final WindowManager windowManager;
+    
+    public EatenDeltaController(EatenDeltaService eatenDeltaService, WindowManager windowManager) {
         this.eatenDeltaService = eatenDeltaService;
+        this.windowManager = windowManager;
     }
     
     /**
@@ -47,14 +53,20 @@ public class EatenDeltaController {
             if (!isValidWindowTime(windowSeconds)) {
                 return ResponseEntity.badRequest().body(Map.of(
                     "error", 
-                    "Invalid window time. Must be one of: 1, 3, 5, 10, 30 seconds"
+                    "Invalid window time. Must be one of: 1, 3, 5, 7, 9, 11, 13, 15, 17, 19 seconds (1-20s with 2s intervals)"
                 ));
             }
             
             int oldWindow = eatenDeltaService.getRollingWindowSeconds();
             eatenDeltaService.setRollingWindowSeconds(windowSeconds);
-            log.info("Eaten Delta discrete window updated from {}s to {}s (discrete windows: 0-{}s, {}-{}s, etc.)", 
-                oldWindow, windowSeconds, windowSeconds, windowSeconds, windowSeconds * 2);
+            
+            // CRITICAL: Synchronize with WindowManager to ensure window boundaries are aligned
+            // Get normalized window size from service (it normalizes to supported values)
+            int normalizedWindowSeconds = eatenDeltaService.getRollingWindowSeconds();
+            windowManager.updateWindowSize(FEATURE_NAME, SYMBOL, normalizedWindowSeconds);
+            
+            log.info("Eaten Delta discrete window updated from {}s to {}s (normalized: {}s). Synchronized with WindowManager. (discrete windows: 0-{}s, {}-{}s, etc.)", 
+                oldWindow, windowSeconds, normalizedWindowSeconds, normalizedWindowSeconds, normalizedWindowSeconds, normalizedWindowSeconds * 2);
             
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
@@ -77,7 +89,7 @@ public class EatenDeltaController {
         try {
             Map<String, Object> response = new HashMap<>();
             response.put("windowSeconds", eatenDeltaService.getRollingWindowSeconds());
-            response.put("availableOptions", new int[]{1, 3, 5, 10, 30});
+            response.put("availableOptions", new int[]{1, 3, 5, 7, 9, 11, 13, 15, 17, 19});
             
             return ResponseEntity.ok(response);
         } catch (Exception e) {
@@ -87,7 +99,9 @@ public class EatenDeltaController {
     }
     
     private boolean isValidWindowTime(int seconds) {
-        return seconds == 1 || seconds == 3 || seconds == 5 || seconds == 10 || seconds == 30;
+        // 1-20s with 2s intervals: 1, 3, 5, 7, 9, 11, 13, 15, 17, 19
+        return seconds == 1 || seconds == 3 || seconds == 5 || seconds == 7 || seconds == 9 ||
+               seconds == 11 || seconds == 13 || seconds == 15 || seconds == 17 || seconds == 19;
     }
 }
 

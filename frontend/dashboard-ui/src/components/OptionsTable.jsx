@@ -118,28 +118,28 @@ export default function OptionsTable({
             <thead className={`${tableHeaderClasses} text-xs font-semibold uppercase tracking-wide`}>
               <tr>
                 <th className="text-left px-3 sm:px-4 py-3">Segment</th>
-                <th className="px-3 sm:px-4 py-3 text-right">LTP</th>
-                <th className="px-3 sm:px-4 py-3 text-right">OI</th>
-                <th className="px-3 sm:px-4 py-3 text-right">Δ OI</th>
-                <th className="px-3 sm:px-4 py-3 text-right">Vol</th>
-                <th className="px-3 sm:px-4 py-3 text-right">Bid</th>
-                <th className="px-3 sm:px-4 py-3 text-right">Ask</th>
-                <th className="px-3 sm:px-4 py-3 text-right">Bid Qty</th>
+                <th className="px-3 sm:px-4 py-3 text-center">LTP</th>
+                <th className="px-3 sm:px-4 py-3 text-center">OI</th>
+                <th className="px-3 sm:px-4 py-3 text-center">Δ OI</th>
+                <th className="px-3 sm:px-4 py-3 text-center">Vol</th>
+                <th className="px-3 sm:px-4 py-3 text-center">Bid</th>
+                <th className="px-3 sm:px-4 py-3 text-center">Ask</th>
+                <th className="px-3 sm:px-4 py-3 text-center">Bid Qty</th>
                 <th 
-                  className="px-3 sm:px-4 py-3 text-right" 
+                  className="px-3 sm:px-4 py-3 text-center" 
                   title="Bid Qty - Ask Qty. Bubble shows Eaten Δ (Ask Eaten - Bid Eaten over rolling window)"
                 >
                   ΔB/A QTY
                 </th>
-                <th className="px-3 sm:px-4 py-3 text-right">Ask Qty</th>
-                <th className="px-3 sm:px-4 py-3 text-right">Δ Price</th>
+                <th className="px-3 sm:px-4 py-3 text-center">Ask Qty</th>
+                <th className="px-3 sm:px-4 py-3 text-center">Δ Price</th>
               </tr>
             </thead>
             <tbody>
               {data
                 .filter(row => !row.isHeader) // Remove "Strike: <value>" header rows
                 .map((row, index) => {
-                const numericCellBase = 'py-2 sm:py-3 px-2 sm:px-4 text-right whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis';
+                const numericCellBase = 'py-2 sm:py-3 px-2 sm:px-4 text-center whitespace-nowrap tabular-nums font-mono data-cell leading-tight text-xs sm:text-sm overflow-hidden text-ellipsis';
                 const borderClass = isDarkMode ? 'border-slate-600/60' : 'border-slate-200/60';
                 const segmentCellClass = `py-2 sm:py-3 px-3 sm:px-4 text-left text-xs sm:text-sm leading-tight border-r ${borderClass} last:border-r-0 ${
                   row.isHeader

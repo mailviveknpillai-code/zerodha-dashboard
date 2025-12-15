@@ -6,7 +6,7 @@ const SpotLtpIntervalContext = createContext();
 /**
  * Provider for Spot LTP Trend interval settings.
  * The interval determines how many seconds of LTP data to use for trend calculation.
- * Valid values: 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60 seconds.
+ * Valid values: 3, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50 seconds (3s-50s range).
  */
 export function SpotLtpIntervalProvider({ children }) {
   const [intervalSeconds, setIntervalSecondsState] = useState(10); // Default 10s
@@ -36,10 +36,13 @@ export function SpotLtpIntervalProvider({ children }) {
 
   // Sync changes to backend and localStorage
   const setIntervalSeconds = useCallback(async (newInterval) => {
-    // Validate: 5-60 seconds, 5s increments
-    let validInterval = Math.max(5, Math.min(60, newInterval));
-    validInterval = Math.round(validInterval / 5) * 5;
-    if (validInterval < 5) validInterval = 5;
+    // Validate: 3-50 seconds, snap to nearest supported value
+    const supportedValues = [3, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50];
+    let validInterval = Math.max(3, Math.min(50, newInterval));
+    // Find closest supported value
+    validInterval = supportedValues.reduce((closest, val) => 
+      Math.abs(val - validInterval) < Math.abs(closest - validInterval) ? val : closest
+    );
     
     setIntervalSecondsState(validInterval);
     localStorage.setItem('spotLtpInterval', validInterval.toString());
@@ -69,5 +72,7 @@ export function useSpotLtpInterval() {
   }
   return context;
 }
+
+
 
 

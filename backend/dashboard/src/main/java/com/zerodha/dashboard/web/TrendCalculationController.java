@@ -1,6 +1,7 @@
 package com.zerodha.dashboard.web;
 
 import com.zerodha.dashboard.service.TrendCalculationService;
+import com.zerodha.dashboard.service.WindowManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -18,11 +19,17 @@ import java.util.Map;
 public class TrendCalculationController {
     
     private static final Logger log = LoggerFactory.getLogger(TrendCalculationController.class);
+    private static final String FEATURE_NAME = "trendScore";
+    private static final String SYMBOL = "NIFTY";
     
     private final TrendCalculationService trendCalculationService;
+    private final WindowManager windowManager;
     
-    public TrendCalculationController(TrendCalculationService trendCalculationService) {
+    public TrendCalculationController(
+            TrendCalculationService trendCalculationService,
+            WindowManager windowManager) {
         this.trendCalculationService = trendCalculationService;
+        this.windowManager = windowManager;
     }
     
     /**
@@ -34,7 +41,9 @@ public class TrendCalculationController {
         int windowSeconds = trendCalculationService.getWindowSeconds();
         Map<String, Integer> response = new HashMap<>();
         response.put("windowSeconds", windowSeconds);
-        log.debug("GET /api/trend-calculation/window: {}", windowSeconds);
+        log.info("GET /api/trend-calculation/window: {}s (TrendCalculationService={}, WindowManager={})", 
+            windowSeconds, windowSeconds, 
+            windowManager.getWindowState(FEATURE_NAME, SYMBOL, windowSeconds).getWindowSeconds());
         return ResponseEntity.ok(response);
     }
     
@@ -49,16 +58,35 @@ public class TrendCalculationController {
         if (seconds == null || seconds <= 0) {
             Map<String, Object> error = new HashMap<>();
             error.put("error", "Invalid window size. Must be a positive integer.");
+            log.warn("Invalid window size requested: {}", seconds);
             return ResponseEntity.badRequest().body(error);
         }
         
+        log.info("TREND WINDOW UPDATE REQUEST: {}s -> {}s (current TrendCalculationService={}, WindowManager={})", 
+            oldWindowSeconds, seconds, oldWindowSeconds,
+            windowManager.getWindowState(FEATURE_NAME, SYMBOL, oldWindowSeconds).getWindowSeconds());
+        
+        // Step 1: Update TrendCalculationService (this also updates WindowManager internally)
         trendCalculationService.setWindowSeconds(seconds);
         
+        // Step 2: Verify WindowManager is synchronized (redundant but ensures consistency)
+        windowManager.updateWindowSize(FEATURE_NAME, SYMBOL, seconds);
+        
+        // Step 3: Verify the update was successful
+        int actualWindowSeconds = trendCalculationService.getWindowSeconds();
+        int windowManagerSeconds = windowManager.getWindowState(FEATURE_NAME, SYMBOL, seconds).getWindowSeconds();
+        
+        if (actualWindowSeconds != seconds || windowManagerSeconds != seconds) {
+            log.error("WARNING: Window size update mismatch! Requested={}, TrendCalculationService={}, WindowManager={}", 
+                seconds, actualWindowSeconds, windowManagerSeconds);
+        }
+        
         Map<String, Object> response = new HashMap<>();
-        response.put("windowSeconds", seconds);
+        response.put("windowSeconds", actualWindowSeconds);
         response.put("previousWindowSeconds", oldWindowSeconds);
         
-        log.info("Trend calculation window updated: {}s -> {}s", oldWindowSeconds, seconds);
+        log.info("Trend calculation window updated successfully: {}s -> {}s (TrendCalculationService={}, WindowManager={})", 
+            oldWindowSeconds, actualWindowSeconds, actualWindowSeconds, windowManagerSeconds);
         return ResponseEntity.ok(response);
     }
     

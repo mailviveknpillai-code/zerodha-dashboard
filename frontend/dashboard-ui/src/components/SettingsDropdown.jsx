@@ -8,6 +8,7 @@ import { useTrendAveraging } from '../contexts/TrendAveragingContext';
 import { useTrendThreshold } from '../contexts/TrendThresholdContext';
 import { useEatenDeltaWindow } from '../contexts/EatenDeltaWindowContext';
 import { useLtpMovementCacheSize } from '../contexts/LtpMovementCacheSizeContext';
+import { useLtpMovementWindow } from '../contexts/LtpMovementWindowContext';
 import { useSpotLtpInterval } from '../contexts/SpotLtpIntervalContext';
 import { useDebugMode } from '../contexts/DebugModeContext';
 import { logoutZerodhaSession } from '../api/client';
@@ -32,6 +33,7 @@ export default function SettingsDropdown() {
   const { bullishThreshold, bearishThreshold, setBullishThreshold, setBearishThreshold } = useTrendThreshold();
   const { windowSeconds, updateWindowSeconds } = useEatenDeltaWindow();
   const { cacheSize: ltpMovementCacheSize, setCacheSize: setLtpMovementCacheSize } = useLtpMovementCacheSize();
+  const { windowSeconds: ltpMovementWindowSeconds, updateWindowSeconds: updateLtpMovementWindowSeconds } = useLtpMovementWindow();
   const { intervalSeconds: spotLtpInterval, setIntervalSeconds: setSpotLtpInterval } = useSpotLtpInterval();
   const { debugMode, setDebugMode } = useDebugMode();
   const navigate = useNavigate();
@@ -228,9 +230,9 @@ export default function SettingsDropdown() {
 
               <ToggleSwitch
                 enabled={debugMode}
-                onChange={setDebugMode}
+                onChange={() => setDebugMode(!debugMode)}
                 label="Debug Mode"
-                description="Enable detailed logging for troubleshooting"
+                description={`Enable detailed logging for troubleshooting (currently ${debugMode ? 'ON' : 'OFF'})`}
                 className={`border-b ${sectionDivider}`}
               />
 
@@ -468,7 +470,7 @@ export default function SettingsDropdown() {
                 <div className="flex items-center justify-between mb-3">
                   <div>
                     <p className="text-sm font-medium">Spot LTP Trend Window</p>
-                    <p className={`text-xs ${sliderHelper}`}>Time window for spot LTP average movement (5-60s)</p>
+                    <p className={`text-xs ${sliderHelper}`}>Time window for spot LTP trend calculation (3-50s)</p>
                   </div>
                 </div>
                 <div className="relative">
@@ -481,7 +483,7 @@ export default function SettingsDropdown() {
                         : 'bg-white border-gray-300 text-gray-900 hover:bg-gray-50 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 focus:bg-white'
                     }`}
                   >
-                    {[5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60].map((seconds) => (
+                    {[3, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50].map((seconds) => (
                       <option 
                         key={seconds} 
                         value={seconds}
@@ -506,7 +508,7 @@ export default function SettingsDropdown() {
                 <div className="flex items-center justify-between mb-3">
                   <div>
                     <p className="text-sm font-medium">Eaten Δ Window</p>
-                    <p className={`text-xs ${sliderHelper}`}>Rolling window for Eaten Delta calculation (1s, 3s, 5s, 10s, 30s)</p>
+                    <p className={`text-xs ${sliderHelper}`}>Rolling window for Eaten Delta calculation (1-20s with 2s intervals)</p>
                   </div>
                 </div>
                 <div className="relative">
@@ -519,12 +521,50 @@ export default function SettingsDropdown() {
                         : 'bg-white border-gray-300 text-gray-900 hover:bg-gray-50 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 focus:bg-white'
                     }`}
                   >
-                    {[1, 3, 5, 10, 30].map((seconds) => (
+                    {[1, 3, 5, 7, 9, 11, 13, 15, 17, 19].map((seconds) => (
                       <option 
                         key={seconds} 
                         value={seconds}
                         className={`
                           ${seconds === windowSeconds 
+                            ? isDarkMode 
+                              ? 'bg-blue-600 text-white' 
+                              : 'bg-blue-500 text-white'
+                            : ''
+                          }
+                          ${isDarkMode ? 'bg-slate-700 text-slate-200' : 'bg-white text-gray-900'}
+                        `}
+                      >
+                        {seconds} second{seconds !== 1 ? 's' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className={`py-4 border-b ${sectionDivider}`}>
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <p className="text-sm font-medium">LTP Movement Window</p>
+                    <p className={`text-xs ${sliderHelper}`}>Time window for LTP movement calculation (1-15s: 3s intervals, 15-60s: 5-10s intervals)</p>
+                  </div>
+                </div>
+                <div className="relative">
+                  <select
+                    value={ltpMovementWindowSeconds}
+                    onChange={(e) => updateLtpMovementWindowSeconds(Number(e.target.value))}
+                    className={`refresh-rate-selector w-full px-4 py-2.5 rounded-lg border text-sm font-medium cursor-pointer transition-all duration-200 ${
+                      isDarkMode
+                        ? 'bg-slate-700/80 border-slate-600 text-slate-200 hover:bg-slate-700 hover:border-slate-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/50 focus:bg-slate-700'
+                        : 'bg-white border-gray-300 text-gray-900 hover:bg-gray-50 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 focus:bg-white'
+                    }`}
+                  >
+                    {[1, 4, 7, 10, 13, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60].map((seconds) => (
+                      <option 
+                        key={seconds} 
+                        value={seconds}
+                        className={`
+                          ${seconds === ltpMovementWindowSeconds 
                             ? isDarkMode 
                               ? 'bg-blue-600 text-white' 
                               : 'bg-blue-500 text-white'

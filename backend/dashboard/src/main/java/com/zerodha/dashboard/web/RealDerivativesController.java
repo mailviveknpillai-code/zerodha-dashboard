@@ -1,14 +1,12 @@
 package com.zerodha.dashboard.web;
 
-import com.zerodha.dashboard.adapter.BreezeApiAdapter;
 import com.zerodha.dashboard.adapter.ZerodhaApiAdapter;
 import com.zerodha.dashboard.model.DerivativesChain;
 import com.zerodha.dashboard.service.LatestSnapshotCacheService;
+import com.zerodha.dashboard.service.BasicValuesCacheService;
 import com.zerodha.dashboard.service.MockDataService;
 import com.zerodha.dashboard.service.ZerodhaSessionService;
 import com.zerodha.dashboard.service.DynamicCacheUpdateScheduler;
-import com.zerodha.dashboard.service.EatenDeltaService;
-import com.zerodha.dashboard.service.LtpMovementService;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
@@ -24,13 +22,13 @@ import java.math.BigDecimal;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.util.*;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Optional;
 import java.util.regex.Pattern;
 
 /**
- * Controller for real derivatives data using Breeze API (primary) and Zerodha Kite API stopping
+ * Controller for real derivatives data using Zerodha Kite API
  */
 @RestController
 @RequestMapping("/api")
@@ -46,20 +44,12 @@ public class RealDerivativesController {
     );
 
     private final Logger log = LoggerFactory.getLogger(RealDerivativesController.class);
-    private final BreezeApiAdapter breezeApiAdapter;
     private final ZerodhaApiAdapter zerodhaApiAdapter;
     private final MockDataService mockDataService;
     private final ZerodhaSessionService zerodhaSessionService;
     private final LatestSnapshotCacheService latestSnapshotCacheService;
+    private final BasicValuesCacheService basicValuesCacheService; // Separate cache for basic values
     private final DynamicCacheUpdateScheduler dynamicCacheUpdateScheduler;
-    private final EatenDeltaService eatenDeltaService;
-    private final LtpMovementService ltpMovementService;
-    
-    // Executor service for async cache updates (non-blocking)
-    private final ExecutorService cacheUpdateExecutor = Executors.newFixedThreadPool(2);
-    
-    @Value("${breeze.api.enabled:true}")
-    private boolean breezeApiEnabled;
     
     @Value("${zerodha.enabled:false}")
     private boolean zerodhaEnabled;
@@ -67,26 +57,22 @@ public class RealDerivativesController {
     @Value("${mock.data.enabled:false}")
     private boolean mockDataEnabled;
 
-    public RealDerivativesController(BreezeApiAdapter breezeApiAdapter,
-                                     ZerodhaApiAdapter zerodhaApiAdapter,
+    public RealDerivativesController(ZerodhaApiAdapter zerodhaApiAdapter,
                                      MockDataService mockDataService,
                                      ZerodhaSessionService zerodhaSessionService,
                                      LatestSnapshotCacheService latestSnapshotCacheService,
-                                     DynamicCacheUpdateScheduler dynamicCacheUpdateScheduler,
-                                     EatenDeltaService eatenDeltaService,
-                                     LtpMovementService ltpMovementService) {
-        this.breezeApiAdapter = breezeApiAdapter;
+                                     BasicValuesCacheService basicValuesCacheService,
+                                     DynamicCacheUpdateScheduler dynamicCacheUpdateScheduler) {
         this.zerodhaApiAdapter = zerodhaApiAdapter;
         this.mockDataService = mockDataService;
         this.zerodhaSessionService = zerodhaSessionService;
         this.latestSnapshotCacheService = latestSnapshotCacheService;
+        this.basicValuesCacheService = basicValuesCacheService;
         this.dynamicCacheUpdateScheduler = dynamicCacheUpdateScheduler;
-        this.eatenDeltaService = eatenDeltaService;
-        this.ltpMovementService = ltpMovementService;
     }
 
     /**
-     * Get real NIFTY derivatives chain using Breeze API (primary) or Zerodha Kite API (production)
+     * Get real NIFTY derivatives chain using Zerodha Kite API
      * GET /api/real-derivatives?underlying=NIFTY
      */
     @GetMapping("/real-derivatives")
@@ -103,7 +89,7 @@ public class RealDerivativesController {
             Optional<DerivativesChain> derivativesChain = Optional.empty();
             String dataSource = "NO_DATA";
             
-            // Priority: Zerodha Kite API (if enabled) > Breeze API > Mock Data
+            // Priority: Zerodha Kite API (if enabled) > Mock Data
             // Mock data is disabled when Zerodha is enabled
             if (zerodhaEnabled) {
                 if (!zerodhaSessionService.hasActiveAccessToken()) {
@@ -127,19 +113,7 @@ public class RealDerivativesController {
                 }
             }
             
-            // Fallback to Breeze API if Zerodha is disabled or failed
-            if (derivativesChain.isEmpty() && breezeApiEnabled && !zerodhaEnabled) {
-                log.info("Fetching data from Breeze API");
-                derivativesChain = breezeApiAdapter.getDerivativesChain(normalizedUnderlying);
-                if (derivativesChain.isPresent()) {
-                    dataSource = "BREEZE_API";
-                    log.info("Successfully fetched derivatives chain using Breeze API");
-                } else {
-                    log.warn("Breeze API returned no data for {}", normalizedUnderlying);
-                }
-            }
-            
-            // Mock data ONLY if both APIs are disabled (never when Zerodha is enabled)
+            // Mock data ONLY if Zerodha is disabled
             if (derivativesChain.isEmpty() && mockDataEnabled && !zerodhaEnabled) {
                 log.info("Using mock data for UI testing (Zerodha is disabled)");
                 derivativesChain = Optional.of(mockDataService.generateMockDerivativesChain());
@@ -150,10 +124,13 @@ public class RealDerivativesController {
             if (derivativesChain.isPresent()) {
                 DerivativesChain chain = derivativesChain.get();
                 
-                // Calculate eaten delta for all contracts
-                calculateEatenDeltaForChain(chain);
+                // REMOVED: calculateEatenDeltaForChain() - Now handled by IndependentBidAskEatenService in DynamicCacheUpdateScheduler
+                // REMOVED: calculateLtpMovementForChain() - Now handled by IndependentLtpMovementService in DynamicCacheUpdateScheduler
+                // These calculations are now done independently by microservices at API polling rate
+                // The /api/real-derivatives endpoint should only return basic values
+                // For calculated metrics (eaten delta, LTP movement), use /api/metrics/latest endpoint
                 
-                // Update cache atomically with the latest snapshot
+                // Update cache atomically with the latest snapshot (basic values only)
                 latestSnapshotCacheService.updateCache(chain);
                 log.info("Successfully fetched real derivatives chain with {} total contracts using {}", 
                         chain.getTotalContracts(), dataSource);
@@ -312,8 +289,7 @@ public class RealDerivativesController {
         }
         
         try {
-            BigDecimal spotPrice = new BigDecimal("25000");
-            Optional<DerivativesChain> chain = breezeApiAdapter.getDerivativesChain(spotPrice);
+            Optional<DerivativesChain> chain = zerodhaApiAdapter.getDerivativesChain(normalizedUnderlying);
             
             Map<String, Object> debug = new HashMap<>();
             if (chain.isPresent()) {
@@ -340,22 +316,70 @@ public class RealDerivativesController {
     }
     
     /**
-     * Get the latest snapshot from cache ONLY (ultra-fast endpoint for UI refresh).
+     * Get BASIC VALUES ONLY (8 columns: LTP, Bid Qty, Ask Qty, Delta, Bid Price, Ask Price, Volume, OI).
+     * GET /api/basic?underlying=NIFTY
+     * 
+     * CRITICAL: This endpoint returns ONLY basic values from API polling - NO calculated metrics.
+     * This is read at UI refresh rate independently of metric calculations.
+     * 
+     * Basic columns:
+     * - lastPrice (LTP)
+     * - bidQuantity
+     * - askQuantity
+     * - bid (Bid Price)
+     * - ask (Ask Price)
+     * - volume
+     * - openInterest (OI)
+     * - delta (calculated as bidQuantity - askQuantity from raw API data)
+     * 
+     * Calculated metrics (trend score, eaten delta, LTP movement, spot LTP trend) are NOT included.
+     * Use /api/metrics/latest for calculated metrics at their own intervals.
+     */
+    @GetMapping("/basic")
+    public ResponseEntity<?> getBasic(@RequestParam(value = "underlying", defaultValue = "NIFTY") String underlying) {
+        log.debug("basic request received for underlying='{}' (basic values only, no metrics)", underlying);
+        
+        String normalizedUnderlying = sanitizeUnderlying(underlying);
+        if (normalizedUnderlying == null) {
+            return validationError("underlying", "Underlying must be 1-15 characters (A-Z, 0-9, hyphen or underscore)");
+        }
+        
+        try {
+            // Return ONLY basic values from separate cache (updated immediately on API poll)
+            Optional<DerivativesChain> cached = basicValuesCacheService.getLatest();
+            if (cached.isPresent()) {
+                DerivativesChain chain = cached.get();
+                if (normalizedUnderlying.equals(chain.getUnderlying())) {
+                    log.debug("Returning basic values for underlying='{}' with {} contracts (8 columns only, no metrics)", 
+                            normalizedUnderlying, chain.getTotalContracts());
+                    return ResponseEntity.ok(chain);
+                } else {
+                    log.warn("Basic cache underlying mismatch: requested={}, cached={}", 
+                            normalizedUnderlying, chain.getUnderlying());
+                }
+            }
+            
+            // Return empty chain if cache is empty
+            log.debug("Basic cache unavailable for underlying='{}', returning empty chain", normalizedUnderlying);
+            DerivativesChain emptyChain = new DerivativesChain(normalizedUnderlying, new BigDecimal("25000"));
+            emptyChain.setDailyStrikePrice(new BigDecimal("25000"));
+            emptyChain.setTimestamp(Instant.now());
+            emptyChain.setDataSource("NO_DATA");
+            return ResponseEntity.ok(emptyChain);
+        } catch (Exception e) {
+            log.error("Error retrieving basic values for {}: {}", underlying, e.getMessage(), e);
+            return ResponseEntity.status(500).body("Error: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Get the latest snapshot from cache (backward compatibility - contains basic + metrics).
      * GET /api/latest?underlying=NIFTY
      * 
-     * IMPORTANT: This endpoint does NOT trigger API calls. It only returns cached data.
-     * API polling is handled by DynamicCacheUpdateScheduler at the configured polling interval.
-     * 
-     * This endpoint:
-     * 1. Returns cached data from Redis (fast, no external API calls)
-     * 2. Recalculates eatenDelta and LTP movement (these are computed from cached bid/ask/LTP values)
-     * 3. If cache is empty, returns empty chain
-     * 
-     * This ensures:
-     * - UI refresh rate does NOT trigger Zerodha API calls
-     * - Backend scheduler handles all API polling at the configured interval
-     * - Frontend can poll this endpoint frequently without crashing
+     * @deprecated Use /api/basic for basic values and /api/metrics/latest for metrics separately.
+     * This endpoint is kept for backward compatibility but should not be used for UI refresh rate.
      */
+    @Deprecated
     @GetMapping("/latest")
     public ResponseEntity<?> getLatest(@RequestParam(value = "underlying", defaultValue = "NIFTY") String underlying) {
         log.debug("latest request received for underlying='{}' (cache-only, no API calls)", underlying);
@@ -421,7 +445,6 @@ public class RealDerivativesController {
      * PUT /api/api-polling-interval
      * Body: { "intervalMs": 1000 }
      */
-    @CrossOrigin(origins = "*", methods = {RequestMethod.PUT, RequestMethod.OPTIONS})
     @PutMapping("/api-polling-interval")
     public ResponseEntity<?> updateApiPollingInterval(@RequestBody Map<String, Object> request) {
         try {
@@ -471,7 +494,6 @@ public class RealDerivativesController {
      * Get the current API polling interval.
      * GET /api/api-polling-interval
      */
-    @CrossOrigin(origins = "*")
     @GetMapping("/api-polling-interval")
     public ResponseEntity<?> getApiPollingInterval() {
         try {
@@ -491,7 +513,6 @@ public class RealDerivativesController {
      * @deprecated Use /api/api-polling-interval instead
      */
     @Deprecated
-    @CrossOrigin(origins = "*", methods = {RequestMethod.PUT, RequestMethod.OPTIONS})
     @PutMapping("/refresh-interval")
     public ResponseEntity<?> updateRefreshInterval(@RequestBody Map<String, Object> request) {
         // Redirect to new endpoint
@@ -505,7 +526,6 @@ public class RealDerivativesController {
      * @deprecated Use /api/api-polling-interval instead
      */
     @Deprecated
-    @CrossOrigin(origins = "*")
     @GetMapping("/refresh-interval")
     public ResponseEntity<?> getRefreshInterval() {
         // Redirect to new endpoint
@@ -516,7 +536,6 @@ public class RealDerivativesController {
      * Get API polling status and warnings.
      * GET /api/api-polling-status
      */
-    @CrossOrigin(origins = "*")
     @GetMapping("/api-polling-status")
     public ResponseEntity<?> getApiPollingStatus() {
         try {
@@ -537,7 +556,6 @@ public class RealDerivativesController {
         log.info("API health check requested");
         
         Map<String, Object> health = new HashMap<>();
-        health.put("breezeApiEnabled", breezeApiEnabled);
         health.put("zerodhaEnabled", zerodhaEnabled);
         health.put("timestamp", Instant.now());
         
@@ -565,35 +583,9 @@ public class RealDerivativesController {
             }
         }
         
-        // Test Breeze API connectivity
-        if (breezeApiEnabled) {
-            try {
-                Optional<BigDecimal> spotPrice = breezeApiAdapter.getSpotPrice("NIFTY");
-                health.put("breezeApiSpotPriceAvailable", spotPrice.isPresent());
-                if (spotPrice.isPresent()) {
-                    health.put("breezeApiCurrentSpotPrice", spotPrice.get());
-                }
-                
-                Optional<DerivativesChain> testChain = breezeApiAdapter.getDerivativesChain("NIFTY");
-                health.put("breezeApiConnected", testChain.isPresent());
-                health.put("breezeApiDataAvailable", testChain.isPresent() && testChain.get().getTotalContracts() > 0);
-                
-                if (testChain.isPresent()) {
-                    health.put("breezeApiFuturesCount", testChain.get().getFutures().size());
-                    health.put("breezeApiCallOptionsCount", testChain.get().getCallOptions().size());
-                    health.put("breezeApiPutOptionsCount", testChain.get().getPutOptions().size());
-                }
-            } catch (Exception e) {
-                health.put("breezeApiConnected", false);
-                health.put("breezeApiError", e.getMessage());
-            }
-        }
-        
         // Determine primary data source
         String primaryDataSource = "NO_DATA";
-        if (breezeApiEnabled && (Boolean) health.getOrDefault("breezeApiConnected", false)) {
-            primaryDataSource = "BREEZE_API";
-        } else if (zerodhaEnabled && (Boolean) health.getOrDefault("zerodhaConnected", false)) {
+        if (zerodhaEnabled && (Boolean) health.getOrDefault("zerodhaConnected", false)) {
             primaryDataSource = "ZERODHA_KITE";
         }
         health.put("primaryDataSource", primaryDataSource);
@@ -636,175 +628,4 @@ public class RealDerivativesController {
         return ResponseEntity.badRequest().body(body);
     }
     
-    /**
-     * Calculate eaten delta for all contracts in the chain.
-     * This is called on every tick to update the eaten delta values.
-     */
-    private void calculateEatenDeltaForChain(DerivativesChain chain) {
-        if (chain == null) {
-            log.warn("calculateEatenDeltaForChain: chain is null");
-            return;
-        }
-        
-        int futuresCount = 0;
-        int callOptionsCount = 0;
-        int putOptionsCount = 0;
-        int errorsCount = 0;
-        
-        try {
-            // Process futures
-            if (chain.getFutures() != null) {
-                for (com.zerodha.dashboard.model.DerivativeContract contract : chain.getFutures()) {
-                    try {
-                        // calculateEatenDelta sets eatenDelta, bidEaten, and askEaten on the contract
-                        eatenDeltaService.calculateEatenDelta(contract);
-                        // Values are already set on contract by calculateEatenDelta
-                        futuresCount++;
-                    } catch (Exception e) {
-                        log.error("Error calculating eatenDelta for futures contract {}: {}", 
-                            contract != null ? contract.getInstrumentToken() : "null", e.getMessage(), e);
-                        errorsCount++;
-                        // Set to 0 on error for all eaten values
-                        if (contract != null) {
-                            contract.setEatenDelta(0L);
-                            contract.setBidEaten(0L);
-                            contract.setAskEaten(0L);
-                        }
-                    }
-                }
-            }
-            
-            // Process call options
-            if (chain.getCallOptions() != null) {
-                for (com.zerodha.dashboard.model.DerivativeContract contract : chain.getCallOptions()) {
-                    try {
-                        // calculateEatenDelta sets eatenDelta, bidEaten, and askEaten on the contract
-                        eatenDeltaService.calculateEatenDelta(contract);
-                        // Values are already set on contract by calculateEatenDelta
-                        callOptionsCount++;
-                    } catch (Exception e) {
-                        log.error("Error calculating eatenDelta for call option {}: {}", 
-                            contract != null ? contract.getInstrumentToken() : "null", e.getMessage(), e);
-                        errorsCount++;
-                        // Set to 0 on error for all eaten values
-                        if (contract != null) {
-                            contract.setEatenDelta(0L);
-                            contract.setBidEaten(0L);
-                            contract.setAskEaten(0L);
-                        }
-                    }
-                }
-            }
-            
-            // Process put options
-            if (chain.getPutOptions() != null) {
-                for (com.zerodha.dashboard.model.DerivativeContract contract : chain.getPutOptions()) {
-                    try {
-                        // calculateEatenDelta sets eatenDelta, bidEaten, and askEaten on the contract
-                        eatenDeltaService.calculateEatenDelta(contract);
-                        // Values are already set on contract by calculateEatenDelta
-                        putOptionsCount++;
-                    } catch (Exception e) {
-                        log.error("Error calculating eatenDelta for put option {}: {}", 
-                            contract != null ? contract.getInstrumentToken() : "null", e.getMessage(), e);
-                        errorsCount++;
-                        // Set to 0 on error for all eaten values
-                        if (contract != null) {
-                            contract.setEatenDelta(0L);
-                            contract.setBidEaten(0L);
-                            contract.setAskEaten(0L);
-                        }
-                    }
-                }
-            }
-            
-            log.debug("calculateEatenDeltaForChain completed: futures={}, calls={}, puts={}, errors={}", 
-                futuresCount, callOptionsCount, putOptionsCount, errorsCount);
-        } catch (Exception e) {
-            log.error("Fatal error in calculateEatenDeltaForChain: {}", e.getMessage(), e);
-        }
-    }
-    
-    /**
-     * Calculate LTP movement for all contracts in the chain.
-     * This is called on every request to update the LTP movement values.
-     */
-    private void calculateLtpMovementForChain(DerivativesChain chain) {
-        if (chain == null) {
-            log.warn("calculateLtpMovementForChain: chain is null");
-            return;
-        }
-        
-        int futuresCount = 0;
-        int callOptionsCount = 0;
-        int putOptionsCount = 0;
-        int errorsCount = 0;
-        
-        try {
-            // Process futures
-            if (chain.getFutures() != null) {
-                for (com.zerodha.dashboard.model.DerivativeContract contract : chain.getFutures()) {
-                    try {
-                        ltpMovementService.calculateLtpMovement(contract);
-                        futuresCount++;
-                    } catch (Exception e) {
-                        log.error("Error calculating LTP movement for futures contract {}: {}", 
-                            contract != null ? contract.getInstrumentToken() : "null", e.getMessage(), e);
-                        errorsCount++;
-                        // Set defaults on error
-                        if (contract != null) {
-                            contract.setLtpMovementDirection("NEUTRAL");
-                            contract.setLtpMovementConfidence(0);
-                            contract.setLtpMovementIntensity("SLOW");
-                        }
-                    }
-                }
-            }
-            
-            // Process call options
-            if (chain.getCallOptions() != null) {
-                for (com.zerodha.dashboard.model.DerivativeContract contract : chain.getCallOptions()) {
-                    try {
-                        ltpMovementService.calculateLtpMovement(contract);
-                        callOptionsCount++;
-                    } catch (Exception e) {
-                        log.error("Error calculating LTP movement for call option {}: {}", 
-                            contract != null ? contract.getInstrumentToken() : "null", e.getMessage(), e);
-                        errorsCount++;
-                        // Set defaults on error
-                        if (contract != null) {
-                            contract.setLtpMovementDirection("NEUTRAL");
-                            contract.setLtpMovementConfidence(0);
-                            contract.setLtpMovementIntensity("SLOW");
-                        }
-                    }
-                }
-            }
-            
-            // Process put options
-            if (chain.getPutOptions() != null) {
-                for (com.zerodha.dashboard.model.DerivativeContract contract : chain.getPutOptions()) {
-                    try {
-                        ltpMovementService.calculateLtpMovement(contract);
-                        putOptionsCount++;
-                    } catch (Exception e) {
-                        log.error("Error calculating LTP movement for put option {}: {}", 
-                            contract != null ? contract.getInstrumentToken() : "null", e.getMessage(), e);
-                        errorsCount++;
-                        // Set defaults on error
-                        if (contract != null) {
-                            contract.setLtpMovementDirection("NEUTRAL");
-                            contract.setLtpMovementConfidence(0);
-                            contract.setLtpMovementIntensity("SLOW");
-                        }
-                    }
-                }
-            }
-            
-            log.debug("calculateLtpMovementForChain completed: futures={}, calls={}, puts={}, errors={}", 
-                futuresCount, callOptionsCount, putOptionsCount, errorsCount);
-        } catch (Exception e) {
-            log.error("Fatal error in calculateLtpMovementForChain: {}", e.getMessage(), e);
-        }
-    }
 }

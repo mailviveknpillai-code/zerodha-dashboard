@@ -1,6 +1,7 @@
 package com.zerodha.dashboard.web;
 
 import com.zerodha.dashboard.service.SpotLtpTrendService;
+import com.zerodha.dashboard.service.WindowManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -15,15 +16,18 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/spot-ltp-trend")
-@CrossOrigin(origins = "*")
 public class SpotLtpTrendController {
     
     private static final Logger log = LoggerFactory.getLogger(SpotLtpTrendController.class);
+    private static final String FEATURE_NAME = "spotLtpMovement";
+    private static final String SYMBOL = "NIFTY";
     
     private final SpotLtpTrendService spotLtpTrendService;
+    private final WindowManager windowManager;
     
-    public SpotLtpTrendController(SpotLtpTrendService spotLtpTrendService) {
+    public SpotLtpTrendController(SpotLtpTrendService spotLtpTrendService, WindowManager windowManager) {
         this.spotLtpTrendService = spotLtpTrendService;
+        this.windowManager = windowManager;
     }
     
     /**
@@ -31,10 +35,14 @@ public class SpotLtpTrendController {
      */
     @GetMapping("/window")
     public ResponseEntity<Map<String, Object>> getWindow() {
+        int windowSeconds = spotLtpTrendService.getWindowSeconds();
         Map<String, Object> response = new HashMap<>();
-        response.put("windowSeconds", spotLtpTrendService.getWindowSeconds());
+        response.put("windowSeconds", windowSeconds);
         response.put("trendPercent", spotLtpTrendService.getTrendPercent());
         response.put("trendDirection", spotLtpTrendService.getTrendDirection());
+        log.info("GET /api/spot-ltp-trend/window: {}s (SpotLtpTrendService={}, WindowManager={})", 
+            windowSeconds, windowSeconds, 
+            windowManager.getWindowState(FEATURE_NAME, SYMBOL, windowSeconds).getWindowSeconds());
         return ResponseEntity.ok(response);
     }
     
@@ -44,21 +52,42 @@ public class SpotLtpTrendController {
      */
     @PostMapping("/window")
     public ResponseEntity<Map<String, Object>> updateWindow(@RequestParam Integer seconds) {
-        log.info("Updating spot LTP trend window to {} seconds", seconds);
+        int oldWindowSeconds = spotLtpTrendService.getWindowSeconds();
         
-        // Validate range (5-60, 5s increments)
-        if (seconds < 5 || seconds > 60) {
+        if (seconds == null || seconds < 5 || seconds > 60) {
             Map<String, Object> error = new HashMap<>();
             error.put("error", "Window must be between 5 and 60 seconds");
             error.put("validValues", new int[]{5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60});
+            log.warn("Invalid window size requested: {}", seconds);
             return ResponseEntity.badRequest().body(error);
         }
         
+        log.info("SPOT_LTP_TREND WINDOW UPDATE REQUEST: {}s -> {}s (current SpotLtpTrendService={}, WindowManager={})", 
+            oldWindowSeconds, seconds, oldWindowSeconds,
+            windowManager.getWindowState(FEATURE_NAME, SYMBOL, oldWindowSeconds).getWindowSeconds());
+        
+        // Step 1: Update SpotLtpTrendService (this also updates WindowManager internally)
         spotLtpTrendService.setWindowSeconds(seconds);
         
+        // Step 2: Verify WindowManager is synchronized (redundant but ensures consistency)
+        windowManager.updateWindowSize(FEATURE_NAME, SYMBOL, seconds);
+        
+        // Step 3: Verify the update was successful
+        int actualWindowSeconds = spotLtpTrendService.getWindowSeconds();
+        int windowManagerSeconds = windowManager.getWindowState(FEATURE_NAME, SYMBOL, seconds).getWindowSeconds();
+        
+        if (actualWindowSeconds != seconds || windowManagerSeconds != seconds) {
+            log.error("WARNING: Spot LTP Trend window size update mismatch! Requested={}, SpotLtpTrendService={}, WindowManager={}", 
+                seconds, actualWindowSeconds, windowManagerSeconds);
+        }
+        
         Map<String, Object> response = new HashMap<>();
-        response.put("windowSeconds", spotLtpTrendService.getWindowSeconds());
+        response.put("windowSeconds", actualWindowSeconds);
+        response.put("previousWindowSeconds", oldWindowSeconds);
         response.put("message", "Spot LTP trend window updated successfully");
+        
+        log.info("Spot LTP trend window updated successfully: {}s -> {}s (SpotLtpTrendService={}, WindowManager={})", 
+            oldWindowSeconds, actualWindowSeconds, actualWindowSeconds, windowManagerSeconds);
         return ResponseEntity.ok(response);
     }
 }

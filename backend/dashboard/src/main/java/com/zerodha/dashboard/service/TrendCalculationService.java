@@ -7,7 +7,14 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Service to calculate market trend indicator.
@@ -55,15 +62,19 @@ public class TrendCalculationService {
     private volatile double bullishThreshold = 3.0;
     private volatile double bearishThreshold = -3.0;
     
-    // Window tracking for discrete intervals (aligned to window boundaries)
-    private volatile Instant windowStartTime = null;
+    // Use WindowManager for synchronized window tracking
+    private final WindowManager windowManager;
+    private static final String TREND_SYMBOL = "NIFTY";
+    private static final String TREND_FEATURE = "trendScore";
     
     // Caches for current window calculation (FIFO within each window)
-    private final Map<String, List<Double>> futuresCache = new HashMap<>();
-    private final Map<String, List<Double>> callsCache = new HashMap<>();
-    private final Map<String, List<Double>> putsCache = new HashMap<>();
+    // Use ConcurrentHashMap for thread safety (accessed by multiple threads during API polling)
+    private final Map<String, List<Double>> futuresCache = new ConcurrentHashMap<>();
+    private final Map<String, List<Double>> callsCache = new ConcurrentHashMap<>();
+    private final Map<String, List<Double>> putsCache = new ConcurrentHashMap<>();
     
     // Classification history for smoothing
+    // Use synchronized collection for thread safety
     private final Deque<String> classificationHistory = new ArrayDeque<>();
     
     /**
@@ -77,9 +88,6 @@ public class TrendCalculationService {
      */
     private volatile String completedClassification = "Neutral";
     private volatile double completedScore = 0.0;
-    private volatile double completedFuturesScore = 0.0;
-    private volatile double completedCallsScore = 0.0;
-    private volatile double completedPutsScore = 0.0;
     
     /**
      * CURRENT WINDOW RESULT - Running calculation for CURRENT window (NOT displayed until window completes)
@@ -92,40 +100,62 @@ public class TrendCalculationService {
     private volatile double currentPutsScore = 0.0;
     
     /**
+     * DISPLAYED SEGMENT SCORES - Last displayed values (persist until new values arrive)
+     * These are shown in real-time and do NOT reset to 0 when window changes.
+     * They only update when new calculated values arrive.
+     */
+    private volatile double displayedFuturesScore = 0.0;
+    private volatile double displayedCallsScore = 0.0;
+    private volatile double displayedPutsScore = 0.0;
+    
+    /**
      * Track if we've completed at least one window.
      * Before the first window completes, we show the current calculation (like eaten delta does).
      */
     private volatile boolean hasCompletedWindow = false;
     
-    public TrendCalculationService() {
+    public TrendCalculationService(WindowManager windowManager) {
+        this.windowManager = windowManager;
         initializeCache(futuresCache);
         initializeCache(callsCache);
         initializeCache(putsCache);
     }
     
     private void initializeCache(Map<String, List<Double>> cache) {
-        cache.put("ltp", new ArrayList<>());
-        cache.put("vol", new ArrayList<>());
-        cache.put("bid", new ArrayList<>());
-        cache.put("ask", new ArrayList<>());
-        cache.put("bidQty", new ArrayList<>());
-        cache.put("askQty", new ArrayList<>());
+        // Use synchronized lists for thread safety (accessed by multiple threads during API polling)
+        cache.put("ltp", Collections.synchronizedList(new ArrayList<>()));
+        cache.put("vol", Collections.synchronizedList(new ArrayList<>()));
+        cache.put("bid", Collections.synchronizedList(new ArrayList<>()));
+        cache.put("ask", Collections.synchronizedList(new ArrayList<>()));
+        cache.put("bidQty", Collections.synchronizedList(new ArrayList<>()));
+        cache.put("askQty", Collections.synchronizedList(new ArrayList<>()));
     }
     
     /**
      * Set window size in seconds (discrete time windows).
+     * CRITICAL: Uses WindowManager's normalized value to ensure synchronization.
      */
     public void setWindowSeconds(int seconds) {
         if (seconds <= 0) {
             log.warn("Invalid window size: {}, using default 5", seconds);
             seconds = 5;
         }
-        int oldSize = this.windowSeconds;
-        this.windowSeconds = seconds;
         
-        if (oldSize != seconds) {
+        // Normalize to supported window size (ensures WindowManager and TrendCalculationService use same value)
+        int normalizedSeconds = WindowManager.getClosestSupportedWindow(TREND_FEATURE, seconds);
+        if (normalizedSeconds != seconds) {
+            log.info("TREND WINDOW NORMALIZATION: Requested {}s -> Normalized {}s (supported windows: {})", 
+                seconds, normalizedSeconds, 
+                java.util.Arrays.toString(WindowManager.SUPPORTED_WINDOWS.get(TREND_FEATURE)));
+        }
+        
+        int oldSize = this.windowSeconds;
+        this.windowSeconds = normalizedSeconds; // Use normalized value to match WindowManager
+        
+        if (oldSize != normalizedSeconds) {
             // Reset window tracking when size changes
-            windowStartTime = null;
+            // Synchronize with WindowManager (pass normalized value)
+            windowManager.updateWindowSize(TREND_FEATURE, TREND_SYMBOL, normalizedSeconds);
             clearAllCaches();
             classificationHistory.clear();
             // Reset current calculation for new window
@@ -134,8 +164,8 @@ public class TrendCalculationService {
             // Reset window completion flag - treat as new first window
             hasCompletedWindow = false;
             // DON'T clear completedClassification/Score - keep displaying last result for smooth transition
-            log.info("TREND WINDOW SIZE CHANGED: {}s -> {}s. Window tracking reset. hasCompletedWindow=false. Display: {} ({})", 
-                oldSize, seconds, completedClassification, String.format("%.2f", completedScore));
+            log.info("TREND WINDOW SIZE CHANGED: {}s -> {}s (normalized from {}s). Window tracking reset. hasCompletedWindow=false. Display: {} ({})", 
+                oldSize, normalizedSeconds, seconds, completedClassification, String.format("%.2f", completedScore));
         }
     }
     
@@ -192,48 +222,42 @@ public class TrendCalculationService {
         
         try {
             Instant now = Instant.now();
-            long epochSecond = now.getEpochSecond();
-            long currentWindowNumber = epochSecond / windowSeconds;
             
-            // Initialize window start time if not set (aligned to discrete boundary)
-            if (windowStartTime == null) {
-                long windowNumber = epochSecond / windowSeconds;
-                windowStartTime = Instant.ofEpochSecond(windowNumber * windowSeconds);
-                log.info("TREND: Initialized window start to {} (aligned to {}s boundary, window #{})", 
-                    windowStartTime, windowSeconds, windowNumber);
-            }
+            // Use WindowManager for synchronized window tracking
+            WindowManager.WindowState windowState = windowManager.getWindowState(
+                TREND_FEATURE, TREND_SYMBOL, windowSeconds);
             
-            // Calculate window boundaries
-            long windowStartNumber = windowStartTime.getEpochSecond() / windowSeconds;
-            
-            // Check if we've moved to a new window
-            boolean windowChanged = currentWindowNumber > windowStartNumber;
+            // Check if we've moved to a new window (synchronized with orchestrator)
+            boolean windowChanged = windowState.checkAndUpdateWindow(now);
             
             // If we've missed windows (e.g., API polling was delayed), log it
-            if (windowChanged && (currentWindowNumber - windowStartNumber) > 1) {
-                long windowsMissed = currentWindowNumber - windowStartNumber - 1;
-                log.warn("TREND: Missed {} window(s) - jumped from window {} to {}. This may cause delayed updates.", 
-                    windowsMissed, windowStartNumber, currentWindowNumber);
+            if (windowChanged && windowState.hasCompletedWindow()) {
+                long currentEpoch = now.getEpochSecond();
+                long windowStartEpoch = windowState.getWindowStartTime().getEpochSecond();
+                long previousWindowEpoch = windowStartEpoch - windowSeconds;
+                long expectedEpoch = previousWindowEpoch + windowSeconds;
+                
+                if (currentEpoch > expectedEpoch + 1) {
+                    long windowsMissed = (currentEpoch - expectedEpoch) / windowSeconds;
+                    log.warn("TREND: Missed {} window(s) - expected window end at {}, but current is {}. This may cause delayed updates.", 
+                        windowsMissed, expectedEpoch, currentEpoch);
+                }
             }
             
             // Log window changes for debugging
             if (windowChanged) {
-                log.info("TREND: Window change - epochSecond={}, window {} -> {}, windowSeconds={}", 
-                    epochSecond, windowStartNumber, currentWindowNumber, windowSeconds);
+                log.info("TREND: Window change detected - epochSecond={}, windowSeconds={}, windowStart={}", 
+                    now.getEpochSecond(), windowSeconds, windowState.getWindowStartTime());
             }
             
-            if (windowChanged) {
+            if (windowChanged && windowState.hasCompletedWindow()) {
                 // Window completed! Commit current result as completed result
-                log.info("TREND WINDOW CHANGE: Window {} completed at epoch {}. Committing score: {} ({}). Window size: {}s",
-                    windowStartNumber, now.getEpochSecond(), currentClassification, String.format("%.2f", currentScore), windowSeconds);
+                log.info("TREND WINDOW CHANGE: Window completed at epoch {}. Committing score: {} ({}). Window size: {}s",
+                    now.getEpochSecond(), currentClassification, String.format("%.2f", currentScore), windowSeconds);
                 
                 commitWindowResult();
                 
-                // Start new window (aligned to boundary)
-                long newWindowStart = currentWindowNumber * windowSeconds;
-                windowStartTime = Instant.ofEpochSecond(newWindowStart);
-                
-                // Clear caches for new window
+                // Clear caches for new window (discard all values from previous window)
                 clearAllCaches();
                 
                 // Reset current calculation for new window
@@ -243,8 +267,12 @@ public class TrendCalculationService {
                 currentCallsScore = 0.0;
                 currentPutsScore = 0.0;
                 
-                log.info("TREND WINDOW CHANGE: New window started: {}s-{}s (window #{}). Display now: {} ({})", 
-                    newWindowStart, newWindowStart + windowSeconds, currentWindowNumber,
+                // NOTE: displayedFuturesScore, displayedCallsScore, displayedPutsScore are NOT reset
+                // They persist until new values are calculated
+                
+                log.info("TREND WINDOW CHANGE: New window started: {}s-{}s. Display now: {} ({})", 
+                    windowState.getWindowStartTime().getEpochSecond(), 
+                    windowState.getWindowEndTime().getEpochSecond(),
                     completedClassification, String.format("%.2f", completedScore));
             }
             
@@ -311,25 +339,34 @@ public class TrendCalculationService {
             chain.setTrendClassification(displayClassification);
             chain.setTrendScore(displayScore);
             
-            // Set segment scores (use completed scores if window completed, otherwise current scores)
-            if (hasCompletedWindow) {
-                chain.setFuturesTrendScore(completedFuturesScore);
-                chain.setCallsTrendScore(completedCallsScore);
-                chain.setPutsTrendScore(completedPutsScore);
-            } else {
-                chain.setFuturesTrendScore(currentFuturesScore);
-                chain.setCallsTrendScore(currentCallsScore);
-                chain.setPutsTrendScore(currentPutsScore);
+            // Set segment scores - Show real-time calculation values
+            // Update displayed scores whenever new values are calculated (even if 0)
+            // Persist last displayed values - do NOT reset to 0 when window changes
+            // Only update if we have data in cache (meaning calculation was performed)
+            if (futuresCache.get("ltp").size() > 0) {
+                displayedFuturesScore = currentFuturesScore;
             }
+            if (callsCache.get("ltp").size() > 0) {
+                displayedCallsScore = currentCallsScore;
+            }
+            if (putsCache.get("ltp").size() > 0) {
+                displayedPutsScore = currentPutsScore;
+            }
+            
+            // Always use displayed scores (persist until new values arrive)
+            chain.setFuturesTrendScore(displayedFuturesScore);
+            chain.setCallsTrendScore(displayedCallsScore);
+            chain.setPutsTrendScore(displayedPutsScore);
             
         } catch (Exception e) {
             log.error("Error calculating trend: {}", e.getMessage(), e);
             // Keep existing completed result on error
             chain.setTrendClassification(completedClassification);
             chain.setTrendScore(completedScore);
-            chain.setFuturesTrendScore(completedFuturesScore);
-            chain.setCallsTrendScore(completedCallsScore);
-            chain.setPutsTrendScore(completedPutsScore);
+            // Use displayed scores (persist last values)
+            chain.setFuturesTrendScore(displayedFuturesScore);
+            chain.setCallsTrendScore(displayedCallsScore);
+            chain.setPutsTrendScore(displayedPutsScore);
         }
     }
     
@@ -345,9 +382,12 @@ public class TrendCalculationService {
         // Store current result as completed result (this is what UI will display)
         completedClassification = currentClassification;
         completedScore = currentScore;
-        completedFuturesScore = currentFuturesScore;
-        completedCallsScore = currentCallsScore;
-        completedPutsScore = currentPutsScore;
+        
+        // Update displayed segment scores with final values from completed window
+        // These persist until new values are calculated in the next window
+        displayedFuturesScore = currentFuturesScore;
+        displayedCallsScore = currentCallsScore;
+        displayedPutsScore = currentPutsScore;
         
         // Mark that we've completed at least one window
         hasCompletedWindow = true;
@@ -615,6 +655,7 @@ public class TrendCalculationService {
                 score *= 0.85;
             }
             
+            // Calculate depth ratio with proper division by zero protection
             if (current.bidQty > 0 && current.askQty > 0) {
                 double depthRatio = current.bidQty / current.askQty;
                 if (depthRatio > 1.2) {
@@ -661,9 +702,21 @@ public class TrendCalculationService {
     
     /**
      * Normalize score to -10 to +10 range.
+     * Calculate maxPossible dynamically based on actual weights to ensure accurate normalization.
      */
     private double normalizeScore(double score) {
+        // Calculate theoretical maximum based on weights:
+        // LTP (1.0) + Volume (0.7) + Bid (0.7) + BidQty (0.4) + AskQty (0.4) + Ask (0.3 soft, max 0.15)
+        // Plus depth ratio boost (0.3)
+        // Total max: 1.0 + 0.7 + 0.7 + 0.4 + 0.4 + 0.15 + 0.3 = 3.65
+        // But for safety, use 5.0 as a conservative maximum to allow for edge cases
         double maxPossible = 5.0;
+        
+        // Handle edge case: if score is 0, return 0 without division
+        if (score == 0.0) {
+            return 0.0;
+        }
+        
         double normalized = (score / maxPossible) * 10;
         return Math.max(-10, Math.min(10, normalized));
     }

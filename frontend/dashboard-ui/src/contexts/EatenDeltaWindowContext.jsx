@@ -5,17 +5,20 @@ const EatenDeltaWindowContext = createContext(null);
 
 /**
  * Context for managing Eaten Delta rolling window time configuration.
- * Allows users to select window duration: 1s, 3s, 5s, 10s, or 30s.
+ * Allows users to select window duration: 1-20s with 2s intervals (1, 3, 5, 7, 9, 11, 13, 15, 17, 19).
  */
 export function EatenDeltaWindowProvider({ children }) {
   const [windowSeconds, setWindowSeconds] = useState(5); // Default: 5 seconds
+  
+  // Supported intervals: 1-20s with 2s intervals
+  const SUPPORTED_INTERVALS = [1, 3, 5, 7, 9, 11, 13, 15, 17, 19];
 
   // Load window time from localStorage on mount
   useEffect(() => {
     const saved = localStorage.getItem('eatenDeltaWindowSeconds');
     if (saved) {
       const seconds = parseInt(saved, 10);
-      if ([1, 3, 5, 10, 30].includes(seconds)) {
+      if (SUPPORTED_INTERVALS.includes(seconds)) {
         setWindowSeconds(seconds);
         // Update backend with saved value
         updateEatenDeltaWindow(seconds).catch(err => {
@@ -26,7 +29,7 @@ export function EatenDeltaWindowProvider({ children }) {
   }, []);
 
   const updateWindowSeconds = useCallback(async (seconds) => {
-    if ([1, 3, 5, 10, 30].includes(seconds)) {
+    if (SUPPORTED_INTERVALS.includes(seconds)) {
       setWindowSeconds(seconds);
       localStorage.setItem('eatenDeltaWindowSeconds', seconds.toString());
       

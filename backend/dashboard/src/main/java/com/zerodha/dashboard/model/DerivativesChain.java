@@ -17,7 +17,7 @@ public class DerivativesChain {
     private List<DerivativeContract> callOptions;
     private List<DerivativeContract> putOptions;
     private Instant timestamp;
-    private String dataSource; // BREEZE_API, ZERODHA_KITE, NO_DATA
+    private String dataSource; // ZERODHA_KITE, MOCK_DATA, NO_DATA
     private String trendClassification; // Bullish, Bearish, Neutral (calculated in backend from API polled values)
     private Double trendScore; // Normalized score from -10 to +10
     private Double futuresTrendScore; // Trend score for futures segment (raw score before normalization)
@@ -25,6 +25,22 @@ public class DerivativesChain {
     private Double putsTrendScore; // Trend score for puts segment (raw score before normalization)
     private Double spotLtpTrendPercent; // Percent change of spot LTP over configured window
     private String spotLtpTrendDirection; // UP, DOWN, FLAT
+    // Trend window metadata for UI timer display
+    private Instant trendWindowStart; // Start time of current trend calculation window
+    private Instant trendWindowEnd; // End time of current trend calculation window
+    private Integer trendWindowSeconds; // Size of trend calculation window in seconds
+    // Spot LTP Trend window metadata for UI timer display
+    private Instant spotLtpWindowStart; // Start time of current spot LTP trend calculation window
+    private Instant spotLtpWindowEnd; // End time of current spot LTP trend calculation window
+    private Integer spotLtpWindowSeconds; // Size of spot LTP trend calculation window in seconds
+    // Eaten Delta window metadata for UI timer display
+    private Instant eatenDeltaWindowStart; // Start time of current eaten delta calculation window
+    private Instant eatenDeltaWindowEnd; // End time of current eaten delta calculation window
+    private Integer eatenDeltaWindowSeconds; // Size of eaten delta calculation window in seconds
+    // LTP Movement window metadata for UI timer display
+    private Instant ltpMovementWindowStart; // Start time of current LTP movement calculation window
+    private Instant ltpMovementWindowEnd; // End time of current LTP movement calculation window
+    private Integer ltpMovementWindowSeconds; // Size of LTP movement calculation window in seconds
 
     public DerivativesChain() {
         this.futures = new ArrayList<>();
@@ -84,6 +100,42 @@ public class DerivativesChain {
 
     public String getSpotLtpTrendDirection() { return spotLtpTrendDirection; }
     public void setSpotLtpTrendDirection(String spotLtpTrendDirection) { this.spotLtpTrendDirection = spotLtpTrendDirection; }
+
+    public Instant getTrendWindowStart() { return trendWindowStart; }
+    public void setTrendWindowStart(Instant trendWindowStart) { this.trendWindowStart = trendWindowStart; }
+
+    public Instant getTrendWindowEnd() { return trendWindowEnd; }
+    public void setTrendWindowEnd(Instant trendWindowEnd) { this.trendWindowEnd = trendWindowEnd; }
+
+    public Integer getTrendWindowSeconds() { return trendWindowSeconds; }
+    public void setTrendWindowSeconds(Integer trendWindowSeconds) { this.trendWindowSeconds = trendWindowSeconds; }
+
+    public Instant getSpotLtpWindowStart() { return spotLtpWindowStart; }
+    public void setSpotLtpWindowStart(Instant spotLtpWindowStart) { this.spotLtpWindowStart = spotLtpWindowStart; }
+
+    public Instant getSpotLtpWindowEnd() { return spotLtpWindowEnd; }
+    public void setSpotLtpWindowEnd(Instant spotLtpWindowEnd) { this.spotLtpWindowEnd = spotLtpWindowEnd; }
+
+    public Integer getSpotLtpWindowSeconds() { return spotLtpWindowSeconds; }
+    public void setSpotLtpWindowSeconds(Integer spotLtpWindowSeconds) { this.spotLtpWindowSeconds = spotLtpWindowSeconds; }
+
+    public Instant getEatenDeltaWindowStart() { return eatenDeltaWindowStart; }
+    public void setEatenDeltaWindowStart(Instant eatenDeltaWindowStart) { this.eatenDeltaWindowStart = eatenDeltaWindowStart; }
+
+    public Instant getEatenDeltaWindowEnd() { return eatenDeltaWindowEnd; }
+    public void setEatenDeltaWindowEnd(Instant eatenDeltaWindowEnd) { this.eatenDeltaWindowEnd = eatenDeltaWindowEnd; }
+
+    public Integer getEatenDeltaWindowSeconds() { return eatenDeltaWindowSeconds; }
+    public void setEatenDeltaWindowSeconds(Integer eatenDeltaWindowSeconds) { this.eatenDeltaWindowSeconds = eatenDeltaWindowSeconds; }
+
+    public Instant getLtpMovementWindowStart() { return ltpMovementWindowStart; }
+    public void setLtpMovementWindowStart(Instant ltpMovementWindowStart) { this.ltpMovementWindowStart = ltpMovementWindowStart; }
+
+    public Instant getLtpMovementWindowEnd() { return ltpMovementWindowEnd; }
+    public void setLtpMovementWindowEnd(Instant ltpMovementWindowEnd) { this.ltpMovementWindowEnd = ltpMovementWindowEnd; }
+
+    public Integer getLtpMovementWindowSeconds() { return ltpMovementWindowSeconds; }
+    public void setLtpMovementWindowSeconds(Integer ltpMovementWindowSeconds) { this.ltpMovementWindowSeconds = ltpMovementWindowSeconds; }
 
     // Helper methods
     public void addFutures(DerivativeContract contract) {

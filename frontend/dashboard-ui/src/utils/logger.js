@@ -1,9 +1,11 @@
 /**
  * Logger utility with debug mode support
- * Debug logs are only printed when debug mode is enabled
+ * Detailed logs are only printed when debug mode is enabled.
+ * When disabled, only basic warnings/errors are logged.
  */
 
-let debugModeEnabled = true; // Default: enabled (will change to false before building)
+// Default: disabled (user can enable explicitly via Debug Mode toggle)
+let debugModeEnabled = false;
 
 // Set debug mode (called by DebugModeContext)
 export function setDebugMode(enabled) {
@@ -24,7 +26,10 @@ const logger = {
   },
   
   info: (...args) => {
-    console.info('[INFO]', ...args);
+    // Treat info as part of detailed logging
+    if (debugModeEnabled) {
+      console.info('[INFO]', ...args);
+    }
   },
   
   warn: (...args) => {
