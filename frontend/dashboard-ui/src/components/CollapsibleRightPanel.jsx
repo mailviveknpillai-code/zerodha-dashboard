@@ -105,8 +105,7 @@ function PanelLTPCell({ contract, label, isDarkMode }) {
   );
 }
 
-export default function CollapsibleRightPanel({ derivativesData }) {
-  const [isCollapsed, setIsCollapsed] = useState(false);
+export default function CollapsibleRightPanel({ derivativesData, isCollapsed, onToggleCollapse, isFullscreen = false }) {
   const { isDarkMode } = useTheme();
   const { intervalSeconds: spotLtpInterval } = useSpotLtpInterval();
   const previousTrendRef = React.useRef({ classification: 'Neutral', score: 0 });
@@ -164,11 +163,29 @@ export default function CollapsibleRightPanel({ derivativesData }) {
     puts: derivativesData?.putsTrendScore != null ? Number(derivativesData.putsTrendScore) : null
   };
 
-  const containerClasses = [
-    'transition-all duration-300 ease-in-out border-l',
-    isCollapsed ? 'w-12' : 'w-80',
-    isDarkMode ? 'bg-slate-800 border-slate-600 text-slate-200' : 'bg-white border-gray-200 text-gray-900',
-  ].join(' ');
+  // Panel is expanded only when explicitly opened (no hover behavior)
+  const isExpanded = !isCollapsed;
+
+  // Apply floating panel look in both fullscreen and normal mode - all corners rounded
+  const containerClasses = isFullscreen
+    ? [
+        'fullscreen-right-panel',
+        isExpanded ? 'expanded' : 'collapsed',
+        'overflow-y-auto',
+        'rounded-2xl', // All corners rounded for complete floating look
+        'table-halo-border-strong', // Colorful blue-purple border like main table
+        isDarkMode 
+          ? 'bg-gradient-to-br from-slate-800/95 via-slate-800/90 to-indigo-900/20 text-slate-200 backdrop-blur-xl' 
+          : 'bg-gradient-to-br from-blue-50/95 via-purple-50/90 to-white/95 text-gray-900 backdrop-blur-xl',
+      ].join(' ')
+    : [
+        'fixed right-1.5 top-20 bottom-1.5 z-30 transition-all duration-300 ease-in-out overflow-hidden',
+        'rounded-2xl table-halo-border-strong backdrop-blur-xl', // All corners rounded
+        isExpanded ? 'w-72' : 'w-14',
+        isDarkMode 
+          ? 'bg-gradient-to-br from-slate-800/95 via-slate-800/90 to-indigo-900/20 text-slate-200' 
+          : 'bg-gradient-to-br from-blue-50/95 via-purple-50/90 to-white/95 text-gray-900',
+      ].join(' ');
 
   const headerButtonClasses = [
     'p-2 rounded-lg transition-colors',
@@ -477,27 +494,74 @@ export default function CollapsibleRightPanel({ derivativesData }) {
     };
   }, [derivativesData?.ltpMovementWindowStart, derivativesData?.ltpMovementWindowSeconds]);
 
+  const renderCollapsedIcons = () => (
+    <div className="flex flex-col items-center gap-6 py-6">
+      {/* Market Trend Icon */}
+      <div className={`p-2 rounded-lg ${isDarkMode ? 'text-green-400' : 'text-green-600'}`} title="Market Trend">
+        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+        </svg>
+      </div>
+      {/* Spot LTP Icon */}
+      <div className={`p-2 rounded-lg ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`} title="Spot LTP">
+        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      </div>
+      {/* Info Icon */}
+      <div className={`p-2 rounded-lg ${isDarkMode ? 'text-slate-400' : 'text-gray-600'}`} title="Information">
+        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      </div>
+    </div>
+  );
+
+  // In fullscreen mode, don't render the panel if collapsed (button handles visibility)
+  if (isFullscreen && isCollapsed) {
+    return null;
+  }
+
   return (
-    <div className={containerClasses}>
-      <div className={`flex items-center justify-between p-2 border-b ${sectionDivider}`}>
-        <button
-          onClick={() => setIsCollapsed(!isCollapsed)}
-          className={headerButtonClasses}
-          title={isCollapsed ? 'Expand panel' : 'Collapse panel'}
-        >
-          <svg
-            className={`w-5 h-5 transition-transform duration-200 ${isCollapsed ? '' : 'rotate-180'}`}
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
+    <div 
+      className={containerClasses}
+      style={{
+        borderRadius: '1rem', // All corners rounded
+        boxShadow: '0 0 0 1px rgba(59, 130, 246, 0.35), 0 0 0 1px rgba(168, 85, 247, 0.35), 0 0 8px rgba(59, 130, 246, 0.28), 0 0 12px rgba(168, 85, 247, 0.28)',
+      }}
+      onClick={!isFullscreen && isCollapsed ? onToggleCollapse : undefined}
+    >
+      <div className={`flex items-center ${isExpanded ? 'justify-between' : 'justify-center'} p-3 ${isFullscreen ? '' : `border-b ${sectionDivider}`}`}>
+        {isExpanded && <h3 className={`text-sm font-semibold ${isFullscreen ? 'text-base' : ''}`}>Market Trend</h3>}
+        {isExpanded && (
+          <button
+            onClick={(e) => {
+              if (!isFullscreen) e.stopPropagation();
+              onToggleCollapse();
+            }}
+            className={`${headerButtonClasses} ${isFullscreen ? 'hover:bg-red-500/20 hover:text-red-400' : ''}`}
+            title="Close panel"
           >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-          </svg>
-        </button>
-        {!isCollapsed && <h3 className="text-sm font-medium">Market Trend</h3>}
+            <svg
+              className={`w-5 h-5 transition-transform duration-200 ${isFullscreen ? '' : 'rotate-180'}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              strokeWidth={isFullscreen ? 2.5 : 2}
+            >
+              {isFullscreen ? (
+                // Right-pointing arrow for fullscreen close
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              ) : (
+                // Left-pointing arrow for normal mode
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              )}
+            </svg>
+          </button>
+        )}
       </div>
 
-      {!isCollapsed && (
+      {isExpanded ? (
         <div className="p-4 space-y-4">
           {/* Market Trend Indicator */}
           <div className={`rounded-lg border p-4 ${trendColor}`}>
@@ -559,9 +623,11 @@ export default function CollapsibleRightPanel({ derivativesData }) {
 
           {/* Main Table LTP Cells - Futures, Call, Put */}
           {derivativesData && (
-            <div className={`rounded-lg border p-3 ${isDarkMode ? 'bg-slate-700/30 border-slate-600' : 'bg-gray-50 border-gray-200'}`}>
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-sm font-medium">Main Table LTP</span>
+            <div className={`rounded-lg p-0 overflow-hidden ${isDarkMode ? 'bg-slate-700/30' : 'bg-gray-50'}`} style={{
+              boxShadow: '0 0 0 1px rgba(59, 130, 246, 0.35), 0 0 0 1px rgba(168, 85, 247, 0.35), 0 0 8px rgba(59, 130, 246, 0.28), 0 0 12px rgba(168, 85, 247, 0.28)',
+            }}>
+              <div className={`flex items-center justify-between p-3 mb-0 ${isDarkMode ? 'bg-slate-800/50' : 'bg-blue-50/50'}`}>
+                <span className="text-sm font-medium">ΔEaten | LTP</span>
                 <div className="flex items-center gap-1.5">
                   {derivativesData?.eatenDeltaWindowSeconds && (
                     <div className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
@@ -583,14 +649,17 @@ export default function CollapsibleRightPanel({ derivativesData }) {
                   )}
                 </div>
               </div>
-              <div className="space-y-2.5">
+              <div className="p-3 pt-3 space-y-0">
                 {/* Futures LTP */}
                 {derivativesData?.futures && derivativesData.futures.length > 0 && (
-                  <PanelLTPCell 
-                    contract={derivativesData.futures[0]} 
-                    label="Futures" 
-                    isDarkMode={isDarkMode}
-                  />
+                  <>
+                    <PanelLTPCell 
+                      contract={derivativesData.futures[0]} 
+                      label="Fut" 
+                      isDarkMode={isDarkMode}
+                    />
+                    <div className={`h-px my-2 ${isDarkMode ? 'bg-slate-600/50' : 'bg-gray-300/50'}`} />
+                  </>
                 )}
                 
                 {/* Call Option LTP (ATM) */}
@@ -609,7 +678,12 @@ export default function CollapsibleRightPanel({ derivativesData }) {
                   
                   if (!atmCall) return null;
                   
-                  return <PanelLTPCell key="call" contract={atmCall} label="Call" isDarkMode={isDarkMode} />;
+                  return (
+                    <>
+                      <PanelLTPCell key="call" contract={atmCall} label="Call" isDarkMode={isDarkMode} />
+                      <div className={`h-px my-2 ${isDarkMode ? 'bg-slate-600/50' : 'bg-gray-300/50'}`} />
+                    </>
+                  );
                 })()}
                 
                 {/* Put Option LTP (ATM) */}
@@ -694,19 +768,10 @@ export default function CollapsibleRightPanel({ derivativesData }) {
               </div>
             </div>
           </div>
-
-          <div className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-gray-500'} border-t ${sectionDivider} pt-4`}>
-            <p className="mb-2 font-medium">Trend Indicators</p>
-            <p className="text-[10px] leading-relaxed mb-2">
-              <strong>Market Trend:</strong> Based on futures, calls, and puts data with discrete window intervals.
-            </p>
-            <p className="text-[10px] leading-relaxed mb-2">
-              <strong>Segment Scores:</strong> Raw trend scores for each segment (futures, calls, puts) before normalization and weighting.
-            </p>
-            <p className="text-[10px] leading-relaxed">
-              <strong>Spot LTP Trend:</strong> Average movement of spot LTP over the last {spotLtpInterval} seconds.
-            </p>
-          </div>
+        </div>
+      ) : (
+        <div className="flex-1 flex items-center justify-center">
+          {renderCollapsedIcons()}
         </div>
       )}
     </div>

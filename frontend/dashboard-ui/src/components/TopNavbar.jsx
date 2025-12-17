@@ -8,8 +8,8 @@ export default function TopNavbar() {
   const location = useLocation();
 
   const navClasses = isDarkMode
-    ? 'bg-slate-800 border-slate-600 text-slate-100'
-    : 'bg-white border-gray-200 text-gray-900';
+    ? 'bg-gradient-to-r from-slate-800 via-indigo-900/30 to-slate-800 border-slate-600 text-slate-100'
+    : 'bg-gradient-to-r from-blue-50/80 via-purple-50/60 to-blue-50/80 border-gray-200 text-gray-900';
 
   const linkBase =
     'px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200';

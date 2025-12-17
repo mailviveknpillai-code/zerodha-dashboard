@@ -88,10 +88,17 @@ export default function SettingsDropdown() {
   ].join(' ');
 
   const dropdownClasses = [
-    'absolute right-0 mt-2 w-80 rounded-xl shadow-2xl border z-50',
+    'absolute right-0 mt-2 w-80 rounded-xl shadow-2xl border z-50 max-h-[66vh] overflow-y-auto',
     isDarkMode
       ? 'bg-slate-800 border-slate-600 text-slate-200'
       : 'bg-white border-gray-200 text-gray-900',
+  ].join(' ');
+
+  const settingItemClasses = [
+    'py-4 border-b transition-all duration-200',
+    isDarkMode
+      ? 'border-slate-600 hover:border-blue-500/50 rounded-lg hover:bg-slate-700/30'
+      : 'border-gray-200 hover:border-blue-400/50 rounded-lg hover:bg-blue-50/30',
   ].join(' ');
 
   const sectionDivider = isDarkMode ? 'border-slate-600' : 'border-gray-200';
@@ -220,24 +227,26 @@ export default function SettingsDropdown() {
         {isOpen && (
           <div className={dropdownClasses}>
             <div className="p-4 space-y-1">
-              <ToggleSwitch
-                enabled={isDarkMode}
-                onChange={toggleDarkMode}
-                label="Dark Mode"
-                description="Switch between light and dark themes"
-                className={`border-b ${sectionDivider}`}
-              />
+              <div className={settingItemClasses}>
+                <ToggleSwitch
+                  enabled={isDarkMode}
+                  onChange={toggleDarkMode}
+                  label="Dark Mode"
+                  description="Switch between light and dark themes"
+                />
+              </div>
 
-              <ToggleSwitch
-                enabled={debugMode}
-                onChange={() => setDebugMode(!debugMode)}
-                label="Debug Mode"
-                description={`Enable detailed logging for troubleshooting (currently ${debugMode ? 'ON' : 'OFF'})`}
-                className={`border-b ${sectionDivider}`}
-              />
+              <div className={settingItemClasses}>
+                <ToggleSwitch
+                  enabled={debugMode}
+                  onChange={() => setDebugMode(!debugMode)}
+                  label="Debug Mode"
+                  description={`Enable detailed logging for troubleshooting (currently ${debugMode ? 'ON' : 'OFF'})`}
+                />
+              </div>
 
                      {/* API Polling Interval - Backend polls Zerodha API */}
-                     <div className={`py-4 border-b ${sectionDivider}`}>
+                     <div className={settingItemClasses}>
                        <div className="flex items-center justify-between mb-3">
                          <div>
                            <p className="text-sm font-medium">API Polling Interval</p>
@@ -276,7 +285,7 @@ export default function SettingsDropdown() {
               </div>
 
                      {/* UI Refresh Rate - Frontend polls backend /latest endpoint */}
-                     <div className={`py-4 border-b ${sectionDivider}`}>
+                     <div className={settingItemClasses}>
                        <div className="flex items-center justify-between mb-3">
                          <div>
                            <p className="text-sm font-medium">UI Refresh Rate</p>
@@ -314,7 +323,7 @@ export default function SettingsDropdown() {
                 </div>
               </div>
 
-              <div className={`py-4 border-b ${sectionDivider}`}>
+              <div className={settingItemClasses}>
                 <div className="flex items-center justify-between mb-3">
                   <div>
                     <p className="text-sm font-medium">Volume Window</p>
@@ -352,7 +361,7 @@ export default function SettingsDropdown() {
                 </div>
               </div>
 
-              <div className={`py-4 border-b ${sectionDivider}`}>
+              <div className={settingItemClasses}>
                 <div className="flex items-center justify-between mb-3">
                   <div>
                     <p className="text-sm font-medium">Trend Calculation Window</p>
@@ -390,7 +399,7 @@ export default function SettingsDropdown() {
                 </div>
               </div>
 
-              <div className={`py-4 border-b ${sectionDivider}`}>
+              <div className={settingItemClasses}>
                 <div className="flex items-center justify-between mb-3">
                   <div>
                     <p className="text-sm font-medium">Bullish Threshold</p>
@@ -428,7 +437,7 @@ export default function SettingsDropdown() {
                 </div>
               </div>
 
-              <div className={`py-4 border-b ${sectionDivider}`}>
+              <div className={settingItemClasses}>
                 <div className="flex items-center justify-between mb-3">
                   <div>
                     <p className="text-sm font-medium">Bearish Threshold</p>
@@ -466,7 +475,7 @@ export default function SettingsDropdown() {
                 </div>
               </div>
 
-              <div className={`py-4 border-b ${sectionDivider}`}>
+              <div className={settingItemClasses}>
                 <div className="flex items-center justify-between mb-3">
                   <div>
                     <p className="text-sm font-medium">Spot LTP Trend Window</p>
@@ -504,7 +513,7 @@ export default function SettingsDropdown() {
                 </div>
               </div>
 
-              <div className={`py-4 border-b ${sectionDivider}`}>
+              <div className={settingItemClasses}>
                 <div className="flex items-center justify-between mb-3">
                   <div>
                     <p className="text-sm font-medium">Eaten Δ Window</p>
@@ -542,7 +551,7 @@ export default function SettingsDropdown() {
                 </div>
               </div>
 
-              <div className={`py-4 border-b ${sectionDivider}`}>
+              <div className={settingItemClasses}>
                 <div className="flex items-center justify-between mb-3">
                   <div>
                     <p className="text-sm font-medium">LTP Movement Window</p>

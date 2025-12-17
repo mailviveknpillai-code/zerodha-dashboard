@@ -11,6 +11,7 @@ const DashboardLayout = memo(function DashboardLayout() {
   const [contracts, setContracts] = useState([]);
   const [selectedContract, setSelectedContract] = useState(null);
   const [isLeftPanelOpen, setIsLeftPanelOpen] = useState(true);
+  const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false);
   const [connectionWarning, setConnectionWarning] = useState(null);
   const [derivativesData, setDerivativesData] = useState(null);
   const { isDarkMode } = useTheme();
@@ -75,6 +76,10 @@ const DashboardLayout = memo(function DashboardLayout() {
     setIsLeftPanelOpen(prev => !prev);
   }, []);
 
+  const handleToggleRightPanel = useCallback(() => {
+    setIsRightPanelCollapsed(prev => !prev);
+  }, []);
+
   const handleSelect = useCallback((symbol) => {
     setSelected(symbol);
   }, []);
@@ -106,7 +111,8 @@ const DashboardLayout = memo(function DashboardLayout() {
           derivativesData={derivativesData}
         />
 
-        <main className={mainContainerClasses}>
+        {/* Main content with dynamic padding for fixed floating sidebars */}
+        <main className={`${mainContainerClasses} lg:ml-20 transition-all duration-300 ${isRightPanelCollapsed ? 'lg:mr-18' : 'lg:mr-[300px]'}`}>
           <MarketSummary symbol={selected} derivativesData={derivativesData} />
 
           {connectionWarning && (
@@ -131,7 +137,11 @@ const DashboardLayout = memo(function DashboardLayout() {
       />
         </main>
 
-        <CollapsibleRightPanel derivativesData={derivativesData} />
+        <CollapsibleRightPanel 
+          derivativesData={derivativesData}
+          isCollapsed={isRightPanelCollapsed}
+          onToggleCollapse={handleToggleRightPanel}
+        />
       </div>
     </div>
   );

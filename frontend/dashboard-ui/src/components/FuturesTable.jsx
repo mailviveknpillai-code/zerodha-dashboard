@@ -8,6 +8,7 @@ import { TrendIcon } from './MarketSummary';
 import { useTheme } from '../contexts/ThemeContext';
 // Trend is now calculated in backend - removed useMarketTrend import
 import { useContractColoringContext } from '../contexts/ContractColorContext';
+import CollapsibleRightPanel from './CollapsibleRightPanel';
 
 export default function FuturesTable({
   spot,
@@ -20,6 +21,7 @@ export default function FuturesTable({
   derivativesData = null,
 }) {
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false);
   const [spotTrend, setSpotTrend] = useState('flat');
   const [volumeTrend, setVolumeTrend] = useState('flat');
   const previousSpotRef = React.useRef(null);
@@ -462,6 +464,10 @@ export default function FuturesTable({
     setIsFullscreen(false);
   };
 
+  const handleToggleRightPanel = () => {
+    setIsRightPanelCollapsed(prev => !prev);
+  };
+
   // Listen for fullscreen changes and restore state on mount
   useEffect(() => {
     // Check if already in fullscreen on mount (e.g., after page reload)
@@ -692,12 +698,39 @@ export default function FuturesTable({
       
       {/* Professional Edge-to-Edge Fullscreen Overlay */}
       {isFullscreen && (
-        <div
-          className={`fullscreen-container fixed inset-0 z-50 flex flex-col w-screen ${
-            isDarkMode ? 'bg-slate-950 text-slate-100' : 'bg-white text-gray-900'
-          }`}
-          style={{ height: 'var(--real-vh, 100vh)', width: '100vw', maxHeight: 'var(--real-vh, 100vh)', maxWidth: '100vw' }}
-        >
+        <>
+          {/* White background region for right side - panel floats on top */}
+          {!isRightPanelCollapsed && (
+            <div 
+              className="fixed right-0 top-0 bottom-0 z-40 bg-white"
+              style={{
+                width: 'calc(280px + 12px)', /* panel width (280px) + 6px gap + 6px right margin */
+                transition: 'width 0.3s ease-out'
+              }}
+            />
+          )}
+
+          {/* Right Panel in Fullscreen Mode */}
+          <CollapsibleRightPanel 
+            derivativesData={derivativesData}
+            isCollapsed={isRightPanelCollapsed}
+            onToggleCollapse={handleToggleRightPanel}
+            isFullscreen={isFullscreen}
+          />
+
+          <div
+            className={`fullscreen-container fixed inset-0 z-50 flex flex-col ${
+              isDarkMode ? 'bg-slate-950 text-slate-100' : 'bg-white text-gray-900'
+            }`}
+            style={{ 
+              height: 'var(--real-vh, 100vh)', 
+              width: isRightPanelCollapsed ? '100vw' : 'calc(100vw - 292px)', /* panel width (280px) + 6px gap + 6px right margin = 292px */
+              maxHeight: 'var(--real-vh, 100vh)', 
+              right: 0,
+              left: 0,
+              transition: 'width 0.3s ease-out'
+            }}
+          >
           {/* Professional Header - Edge to Edge */}
           <div className={`flex-shrink-0 ${
             isDarkMode 
@@ -781,6 +814,32 @@ export default function FuturesTable({
                     )}
                   </>
                 )}
+                
+                {/* Right Panel Toggle Button */}
+                <button
+                  onClick={handleToggleRightPanel}
+                  className={`p-4 rounded-lg transition-all duration-200 group ${
+                    isDarkMode
+                      ? isRightPanelCollapsed 
+                        ? 'text-blue-400 hover:text-blue-300 hover:bg-blue-900/30'
+                        : 'text-slate-300 hover:text-white hover:bg-slate-700'
+                      : isRightPanelCollapsed
+                        ? 'text-blue-600 hover:text-blue-700 hover:bg-blue-100'
+                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200'
+                  }`}
+                  title={isRightPanelCollapsed ? 'Show market info panel' : 'Hide market info panel'}
+                >
+                  <svg className="w-8 h-8 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                    {isRightPanelCollapsed ? (
+                      // Info icon when panel is closed
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    ) : (
+                      // Right chevron icon when panel is open (to close)
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    )}
+                  </svg>
+                </button>
+
                 <button
                   onClick={exitFullscreen}
                   className={`p-4 rounded-lg transition-all duration-200 group ${
@@ -888,6 +947,7 @@ export default function FuturesTable({
             </table>
           </div>
         </div>
+        </>
       )}
     </div>
   );
